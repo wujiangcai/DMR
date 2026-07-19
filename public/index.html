@@ -68,7 +68,12 @@
         <section class="card panel">
           <span class="eyebrow">当前曲线</span>
           <label class="wide-label">编辑通道<select id="channelSelect"></select></label>
-          <div class="legend"><span class="line original"></span>原始温度 <span class="line target"></span>编辑结果</div>
+          <div class="channel-display-heading">
+            <b>叠加展示通道</b>
+            <span><button id="showOnlyActiveBtn" class="ghost mini" type="button">仅当前</button><button id="showAllChannelsBtn" class="ghost mini" type="button">全部</button></span>
+          </div>
+          <div id="channelDisplayList" class="channel-chip-grid"></div>
+          <div class="channel-edit-note"><span class="line original"></span>灰色虚线为当前编辑通道原始值；彩色实线为各通道目标值。</div>
           <div class="stat-grid">
             <div><small>最低</small><b id="statMin">—</b></div>
             <div><small>最高</small><b id="statMax">—</b></div>
@@ -130,6 +135,7 @@
               <button id="drawModeBtn" class="draw-toggle active">✦ 拖动绘制</button>
             </div>
           </div>
+          <div id="chartChannelLegend" class="chart-channel-legend"></div>
           <div class="canvas-wrap">
             <canvas id="curveCanvas"></canvas>
             <div id="chartTooltip" class="chart-tooltip hidden"></div>
@@ -139,7 +145,7 @@
 
         <section class="card table-card">
           <div class="section-heading table-heading">
-            <div><span class="eyebrow">逐点精修</span><h2>温度数据表</h2></div>
+            <div><span class="eyebrow">逐点精修 · 仅编辑当前通道</span><h2 id="tableTitle">通道01 温度数据表</h2></div>
             <div class="pager"><button id="prevPage" class="ghost small">上一页</button><span id="pageText">1 / 1</span><button id="nextPage" class="ghost small">下一页</button></div>
           </div>
           <div class="table-scroll">

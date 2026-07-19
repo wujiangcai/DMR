@@ -76,6 +76,18 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .line { width:20px; height:3px; border-radius:3px; display:inline-block; }
 .line.original { background:#9aa8ae; }
 .line.target { background:var(--orange); margin-left:7px; }
+.channel-display-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; color:#52636d; font-size:10px; }
+.channel-display-heading span { display:flex; gap:4px; }
+.mini { padding:3px 6px; border-radius:6px; font-size:9px; }
+.channel-chip-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-top:7px; }
+.channel-chip { min-width:0; display:flex; align-items:center; gap:5px; padding:6px 5px; color:#4c5d65; border:1px solid #d8e1e4; border-radius:7px; background:#fff; font-size:9px; cursor:pointer; }
+.channel-chip:hover { border-color:#9ebdb9; background:#f5faf9; }
+.channel-chip.active { color:#163e3b; border-color:#79aaa5; background:#eaf5f3; font-weight:800; }
+.channel-chip input { width:auto; margin:0; padding:0; accent-color:var(--channel-color,var(--teal)); }
+.channel-chip input:disabled { opacity:.8; }
+.channel-swatch { width:8px; height:8px; flex:0 0 auto; border-radius:50%; background:var(--channel-color); box-shadow:0 0 0 2px rgba(255,255,255,.8),0 0 0 3px var(--channel-color); }
+.channel-edit-note { margin-top:8px; color:var(--muted); font-size:9px; line-height:1.5; }
+.channel-edit-note .line { width:15px; height:0; margin-right:4px; border-top:2px dashed #9aa8ae; background:none; vertical-align:middle; }
 .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:13px; }
 .stat-grid div { padding:9px 10px; border-radius:9px; background:#f5f8f8; }
 .stat-grid small { display:block; color:var(--muted); font-size:10px; }
@@ -104,11 +116,23 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .chart-actions { display:flex; gap:8px; }
 .chart-actions { align-items:center; }
 .time-window { width:82px; margin:0; padding:6px 8px; font-size:11px; }
+.chart-channel-legend { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-height:33px; padding:0 20px 10px; }
+.chart-legend-item { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; color:#53656d; border:1px solid #dce4e7; border-radius:15px; background:#fff; font-size:9px; cursor:pointer; }
+.chart-legend-item:hover { border-color:#9bbab7; background:#f5faf9; }
+.chart-legend-item.active { color:#173f3c; border-color:#86b4af; background:#eaf5f3; font-weight:800; }
+.chart-legend-item .channel-swatch { width:7px; height:7px; }
+.chart-legend-original { display:inline-flex; align-items:center; gap:5px; color:#7b888e; font-size:9px; }
+.legend-dash { width:18px; border-top:2px dashed #98a6ac; }
 .draw-toggle { color:#fff; background:var(--orange); }
 .draw-toggle:not(.active) { color:#8a4b2b; border-color:#efb28e; background:#fff7f2; }
 .canvas-wrap { position:relative; height:500px; margin:0 12px; border:1px solid #e2e8ea; border-radius:11px; overflow:hidden; background:#fff; }
 #curveCanvas { display:block; width:100%; height:100%; cursor:crosshair; touch-action:none; }
-.chart-tooltip { position:absolute; z-index:3; pointer-events:none; min-width:150px; padding:8px 10px; color:#fff; background:rgba(21,34,42,.92); border-radius:8px; font-size:11px; box-shadow:0 6px 18px rgba(0,0,0,.18); }
+.chart-tooltip { position:absolute; z-index:3; pointer-events:none; min-width:240px; max-width:270px; max-height:360px; overflow:hidden; padding:9px 11px; color:#fff; background:rgba(21,34,42,.94); border-radius:8px; font-size:10px; box-shadow:0 6px 18px rgba(0,0,0,.18); }
+.chart-tooltip > strong { display:block; margin-bottom:5px; font-size:11px; }
+.tooltip-channel { display:flex; align-items:center; gap:4px; padding:2px 0; white-space:nowrap; }
+.tooltip-channel i { width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:var(--channel-color); }
+.tooltip-channel em { padding:1px 3px; color:#d9f2ef; border:1px solid rgba(207,240,236,.28); border-radius:4px; font-size:8px; font-style:normal; }
+.chart-tooltip > small { display:block; margin-top:5px; color:#b8c9cf; font-size:9px; }
 .chart-hint { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:9px 20px 14px; color:var(--muted); font-size:11px; }
 #zoomStatus { color:var(--teal); font-weight:700; white-space:nowrap; }
 .table-card { overflow:hidden; }

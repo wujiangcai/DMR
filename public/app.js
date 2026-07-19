@@ -5,9 +5,14 @@
   const state = {
     plrFile: null, excelFile: null, session: null,
     activeChannel: 1, selection: [0, 0], view: [0, 0], page: 0, pageSize: 50,
+    displayChannels: [],
     undo: [], redo: [], drawEnabled: true, drag: null, panDrag: null, hoverIndex: null,
     chartMeta: null, latestOutput: null, requirementResult: null,
   };
+
+  const CHANNEL_COLORS = ["#e96d2f", "#0d8f83", "#3f78b5", "#8b5fbf", "#d39a19", "#d24f73", "#4d9a57", "#7b6b55", "#536f8d"];
+  const channelColor = channel => CHANNEL_COLORS[(Number(channel) - 1) % CHANNEL_COLORS.length];
+  const channelLabel = channel => `通道${String(channel).padStart(2, "0")}`;
 
   const operationDefinitions = {
     offset: `<label class="full">温度变化（℃）<input data-op="value" type="number" value="5" step="0.1"></label>`,
@@ -69,6 +74,7 @@
       const alignment = core.alignExcelToPlr(excel, plr, { rawPerCelsius: options.rawPerCelsius });
       state.session = core.buildSession(plr, excel, alignment, { rawPerCelsius: options.rawPerCelsius });
       state.activeChannel = state.session.usableChannels[0];
+      state.displayChannels = [state.activeChannel];
       state.selection = [0, state.session.rows.length - 1]; state.view = [...state.selection]; state.page = 0;
       state.undo = []; state.redo = []; state.latestOutput = null; state.requirementResult = null; state.hoverIndex = null;
       initializeWorkspace();
@@ -84,6 +90,7 @@
     const session = state.session, max = session.rows.length - 1;
     const select = $("channelSelect"); select.innerHTML = session.usableChannels.map(ch => `<option value="${ch}">通道${String(ch).padStart(2, "0")}</option>`).join("");
     select.value = state.activeChannel;
+    state.displayChannels = normalizedDisplayChannels();
     for (const id of ["rangeStart", "rangeEnd"]) { $(id).max = max; $(id).step = 1; }
     $("rangeStart").value = 0; $("rangeEnd").value = max;
     $("manualStartRecord").value = session.alignment.startRecordIndex;
@@ -95,8 +102,8 @@
   function renderAll(invalidateValidation = true) {
     if (!state.session) return;
     if (invalidateValidation) { state.latestOutput = null; state.requirementResult = null; }
-    normalizeSelection(); renderRange(); renderStats(); renderDiagnostics(); renderTable(); renderRequirements(); drawChart();
-    $("chartTitle").textContent = `通道${String(state.activeChannel).padStart(2, "0")} 温度曲线`;
+    normalizeSelection(); renderRange(); renderStats(); renderDiagnostics(); renderTable(); renderRequirements(); renderChannelControls(); drawChart();
+    renderChartTitle();
     $("saveState").textContent = `${totalChangedPoints()} 个点已修改`;
     if (invalidateValidation) setValidationWaiting();
   }
@@ -144,6 +151,54 @@
       ["记录结构", `${s.plr.layout.totalRecords} × ${s.plr.layout.recordSize} B`], ["自动物理起点", a.startRecordIndex],
       ["对齐平均误差", `${a.meanAbsError.toFixed(3)} ℃`], ["对齐置信度", confidence], ["raw / ℃", s.scale],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  }
+
+  function normalizedDisplayChannels() {
+    if (!state.session) return [];
+    const usable = state.session.usableChannels;
+    const selected = new Set((state.displayChannels || []).map(Number).filter(channel => usable.includes(channel)));
+    selected.add(state.activeChannel);
+    return usable.filter(channel => selected.has(channel));
+  }
+
+  function setActiveChannel(channel) {
+    channel = Number(channel);
+    if (!state.session.usableChannels.includes(channel)) return;
+    state.activeChannel = channel;
+    state.displayChannels = normalizedDisplayChannels();
+    $("channelSelect").value = channel;
+    state.page = 0;
+    renderAll(false);
+  }
+
+  function renderChartTitle() {
+    const channels = normalizedDisplayChannels();
+    $("chartTitle").textContent = channels.length === 1
+      ? `${channelLabel(state.activeChannel)} 温度曲线`
+      : `${channels.length} 个通道叠加曲线 · 当前编辑 ${channelLabel(state.activeChannel)}`;
+    $("tableTitle").textContent = `${channelLabel(state.activeChannel)} 温度数据表`;
+    $("applyOperationBtn").textContent = `应用到${channelLabel(state.activeChannel)}选中范围`;
+  }
+
+  function renderChannelControls() {
+    if (!state.session) return;
+    state.displayChannels = normalizedDisplayChannels();
+    const selected = new Set(state.displayChannels), root = $("channelDisplayList");
+    root.innerHTML = state.session.usableChannels.map(channel => {
+      const active = channel === state.activeChannel;
+      return `<label class="channel-chip ${active ? "active" : ""}" style="--channel-color:${channelColor(channel)}" title="${active ? "当前编辑通道始终显示" : `叠加显示${channelLabel(channel)}`}"><input type="checkbox" data-display-channel="${channel}" ${selected.has(channel) ? "checked" : ""} ${active ? "disabled" : ""}><span class="channel-swatch"></span><span>${String(channel).padStart(2, "0")}</span></label>`;
+    }).join("");
+    root.querySelectorAll("[data-display-channel]").forEach(input => input.addEventListener("change", () => {
+      const channel = Number(input.dataset.displayChannel), next = new Set(state.displayChannels);
+      if (input.checked) next.add(channel); else next.delete(channel);
+      state.displayChannels = state.session.usableChannels.filter(item => next.has(item));
+      renderChannelControls(); renderChartTitle(); drawChart();
+    }));
+
+    const legend = $("chartChannelLegend");
+    legend.innerHTML = state.displayChannels.map(channel => `<button type="button" class="chart-legend-item ${channel === state.activeChannel ? "active" : ""}" data-edit-channel="${channel}" style="--channel-color:${channelColor(channel)}" title="设为编辑通道"><span class="channel-swatch"></span>${channelLabel(channel)}${channel === state.activeChannel ? " · 编辑中" : ""}</button>`).join("")
+      + `<span class="chart-legend-original"><span class="legend-dash"></span>当前编辑通道原始值</span>`;
+    legend.querySelectorAll("[data-edit-channel]").forEach(button => button.addEventListener("click", () => setActiveChannel(button.dataset.editChannel)));
   }
 
   function renderOperationFields() { $("operationFields").innerHTML = operationDefinitions[$("operationMode").value]; }
@@ -394,16 +449,30 @@
   function drawChart(canvas = $("curveCanvas"), exportMode = false) {
     if (!state.session) return;
     const dimensions = setupCanvas(canvas, exportMode ? 1800 : null, exportMode ? 1000 : null);
-    const { ctx, width, height } = dimensions, series = state.session.channels[state.activeChannel], [start, end] = state.view;
+    const { ctx, width, height } = dimensions, activeSeries = state.session.channels[state.activeChannel], channels = normalizedDisplayChannels(), [start, end] = state.view;
     ctx.clearRect(0, 0, width, height); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, width, height);
-    const top = exportMode ? 118 : 25, bottom = exportMode ? 82 : 48, left = exportMode ? 92 : 62, right = exportMode ? 48 : 24;
+    const top = exportMode ? 148 : 25, bottom = exportMode ? 82 : 48, left = exportMode ? 92 : 62, right = exportMode ? 48 : 24;
     if (exportMode) {
       ctx.fillStyle = "#153038"; ctx.font = "700 32px 'Microsoft YaHei', sans-serif"; ctx.fillText($("imageTitle").value || "温度记录曲线", left, 46);
       ctx.fillStyle = "#537078"; ctx.font = "18px 'Microsoft YaHei', sans-serif"; ctx.fillText([$("customerName").value, $("imageNote").value].filter(Boolean).join("  ·  "), left, 80);
-      ctx.textAlign = "right"; ctx.fillStyle = "#0d776d"; ctx.font = "700 18px 'Segoe UI', sans-serif"; ctx.fillText(`通道${String(state.activeChannel).padStart(2, "0")}  /  DMR Curve Studio`, width - right, 48); ctx.textAlign = "left";
+      const channelText = channels.length === state.session.usableChannels.length ? `全部 ${channels.length} 通道` : channels.map(channelLabel).join(" / ");
+      ctx.textAlign = "right"; ctx.fillStyle = "#0d776d"; ctx.font = "700 18px 'Segoe UI', sans-serif"; ctx.fillText(`${channelText}  /  DMR Curve Studio`, width - right, 48); ctx.textAlign = "left";
+      let legendX = left;
+      ctx.font = "600 15px 'Microsoft YaHei', sans-serif";
+      for (const channel of channels) {
+        ctx.strokeStyle = channelColor(channel); ctx.lineWidth = channel === state.activeChannel ? 4 : 2.5; ctx.beginPath(); ctx.moveTo(legendX, 112); ctx.lineTo(legendX + 28, 112); ctx.stroke();
+        ctx.fillStyle = "#40575f"; ctx.fillText(`${channelLabel(channel)}${channel === state.activeChannel ? "（编辑）" : ""}`, legendX + 35, 117);
+        legendX += channel === state.activeChannel ? 150 : 105;
+      }
+      ctx.save(); ctx.setLineDash([7, 5]); ctx.strokeStyle = "#98a6ac"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(legendX, 112); ctx.lineTo(legendX + 28, 112); ctx.stroke(); ctx.restore();
+      ctx.fillStyle = "#687a82"; ctx.fillText("当前通道原始值", legendX + 35, 117);
     }
     const values = [];
-    for (let i = start; i <= end; i++) { if (Number.isFinite(series.original[i])) values.push(series.original[i]); if (Number.isFinite(series.targets[i])) values.push(series.targets[i]); }
+    for (const channel of channels) {
+      const series = state.session.channels[channel];
+      for (let i = start; i <= end; i++) if (Number.isFinite(series.targets[i])) values.push(series.targets[i]);
+    }
+    for (let i = start; i <= end; i++) if (Number.isFinite(activeSeries.original[i])) values.push(activeSeries.original[i]);
     if (!values.length) return;
     let min = Math.min(...values), max = Math.max(...values); const pad = Math.max(2, (max - min) * .09); min -= pad; max += pad; if (min === max) { min -= 1; max += 1; }
     const plotW = width - left - right, plotH = height - top - bottom, xOf = i => left + (i - start) / Math.max(1, end - start) * plotW, yOf = v => top + (max - v) / (max - min) * plotH;
@@ -412,13 +481,22 @@
     for (let g = 0; g <= 8; g++) { const x = left + plotW * g / 8, index = Math.min(end, Math.round(start + (end - start) * g / 8)); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotH); ctx.stroke(); ctx.textAlign = g === 0 ? "left" : g === 8 ? "right" : "center"; const label = state.session.rows[index].time.slice(5, 16); ctx.fillText(label, x, top + plotH + (exportMode ? 31 : 21)); }
     const [selA, selB] = state.selection;
     if (!exportMode && selB >= start && selA <= end) { const x1 = xOf(Math.max(start, selA)), x2 = xOf(Math.min(end, selB)); ctx.fillStyle = "rgba(13,119,109,.055)"; ctx.fillRect(x1, top, Math.max(2, x2 - x1), plotH); ctx.strokeStyle = "rgba(13,119,109,.35)"; ctx.strokeRect(x1, top, Math.max(2, x2 - x1), plotH); }
-    drawSeries(ctx, series.original, start, end, xOf, yOf, "#98a6ac", exportMode ? 2 : 1.25, plotW);
-    drawSeries(ctx, series.targets, start, end, xOf, yOf, "#e96d2f", exportMode ? 4 : 2.2, plotW);
-    if (!exportMode && state.hoverIndex != null && state.hoverIndex >= start && state.hoverIndex <= end && Number.isFinite(series.targets[state.hoverIndex])) {
-      const hx = xOf(state.hoverIndex), hy = yOf(series.targets[state.hoverIndex]);
+    drawSeries(ctx, activeSeries.original, start, end, xOf, yOf, "#98a6ac", exportMode ? 2 : 1.35, plotW, { dash: exportMode ? [8, 6] : [5, 4], alpha: .9 });
+    for (const channel of channels.filter(channel => channel !== state.activeChannel)) {
+      drawSeries(ctx, state.session.channels[channel].targets, start, end, xOf, yOf, channelColor(channel), exportMode ? 2.6 : 1.55, plotW, { alpha: .88 });
+    }
+    drawSeries(ctx, activeSeries.targets, start, end, xOf, yOf, channelColor(state.activeChannel), exportMode ? 4.5 : 2.7, plotW);
+    if (!exportMode && state.hoverIndex != null && state.hoverIndex >= start && state.hoverIndex <= end && Number.isFinite(activeSeries.targets[state.hoverIndex])) {
+      const hx = xOf(state.hoverIndex), hy = yOf(activeSeries.targets[state.hoverIndex]);
       ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = "rgba(13,119,109,.45)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(hx, top); ctx.lineTo(hx, top + plotH); ctx.moveTo(left, hy); ctx.lineTo(left + plotW, hy); ctx.stroke();
-      ctx.setLineDash([]); ctx.fillStyle = "#fff"; ctx.strokeStyle = "#e96d2f"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(hx, hy, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+      ctx.setLineDash([]);
+      for (const channel of channels) {
+        const value = state.session.channels[channel].targets[state.hoverIndex]; if (!Number.isFinite(value)) continue;
+        ctx.fillStyle = "#fff"; ctx.strokeStyle = channelColor(channel); ctx.lineWidth = channel === state.activeChannel ? 2.4 : 1.7;
+        ctx.beginPath(); ctx.arc(hx, yOf(value), channel === state.activeChannel ? 4.8 : 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
     }
     ctx.strokeStyle = "#9caaaf"; ctx.lineWidth = 1; ctx.strokeRect(left, top, plotW, plotH);
     ctx.save(); ctx.translate(exportMode ? 28 : 17, top + plotH / 2); ctx.rotate(-Math.PI / 2); ctx.fillStyle = "#526870"; ctx.font = `${exportMode ? 17 : 10}px 'Microsoft YaHei', sans-serif`; ctx.textAlign = "center"; ctx.fillText("温度（℃）", 0, 0); ctx.restore();
@@ -429,14 +507,14 @@
     }
   }
 
-  function drawSeries(ctx, values, start, end, xOf, yOf, color, lineWidth, plotWidth) {
+  function drawSeries(ctx, values, start, end, xOf, yOf, color, lineWidth, plotWidth, options = {}) {
     const step = Math.max(1, Math.floor((end - start + 1) / Math.max(300, plotWidth * 1.5)));
-    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.lineJoin = "round"; ctx.lineCap = "round"; let drawing = false;
+    ctx.save(); ctx.beginPath(); ctx.strokeStyle = color; ctx.globalAlpha = options.alpha == null ? 1 : options.alpha; ctx.setLineDash(options.dash || []); ctx.lineWidth = lineWidth; ctx.lineJoin = "round"; ctx.lineCap = "round"; let drawing = false;
     for (let i = start; i <= end; i += step) {
       const value = values[i]; if (!Number.isFinite(value)) { drawing = false; continue; }
       const x = xOf(i), y = yOf(value); if (!drawing) { ctx.moveTo(x, y); drawing = true; } else ctx.lineTo(x, y);
     }
-    if (Number.isFinite(values[end])) ctx.lineTo(xOf(end), yOf(values[end])); ctx.stroke();
+    if (Number.isFinite(values[end])) ctx.lineTo(xOf(end), yOf(values[end])); ctx.stroke(); ctx.restore();
   }
 
   function canvasPoint(event) {
@@ -491,10 +569,19 @@
   }
 
   function showChartTooltip(event, p) {
-    const series = state.session.channels[state.activeChannel], row = state.session.rows[p.index], tip = $("chartTooltip");
-    const original = series.original[p.index], target = series.targets[p.index];
-    tip.innerHTML = `<b>${row.time}</b><br>原始：${original == null ? "—" : original.toFixed(2)} ℃<br>目标：${target == null ? "—" : target.toFixed(2)} ℃<br>物理记录：${row.physicalRecordIndex}`;
-    const wrap = $("curveCanvas").parentElement.getBoundingClientRect(); tip.style.left = `${Math.min(wrap.width - 170, p.x + 14)}px`; tip.style.top = `${Math.max(8, p.y - 36)}px`; tip.classList.remove("hidden");
+    const row = state.session.rows[p.index], tip = $("chartTooltip");
+    const lines = normalizedDisplayChannels().map(channel => {
+      const series = state.session.channels[channel], original = series.original[p.index], target = series.targets[p.index];
+      const changed = Number.isFinite(original) && Number.isFinite(target) && Math.abs(original - target) > 1e-9;
+      const value = target == null ? "—" : `${target.toFixed(2)} ℃`;
+      const detail = channel === state.activeChannel
+        ? ` <em>编辑</em> · 原始 ${original == null ? "—" : original.toFixed(2) + " ℃"} → ${value}`
+        : ` · ${value}${changed ? " · 已修改" : ""}`;
+      return `<span class="tooltip-channel" style="--channel-color:${channelColor(channel)}"><i></i><b>${channelLabel(channel)}</b>${detail}</span>`;
+    }).join("");
+    tip.innerHTML = `<strong>${row.time}</strong>${lines}<small>物理记录：${row.physicalRecordIndex}</small>`;
+    const wrap = $("curveCanvas").parentElement.getBoundingClientRect(); tip.classList.remove("hidden");
+    tip.style.left = `${Math.max(8, Math.min(wrap.width - 270, p.x + 14))}px`; tip.style.top = `${Math.max(8, Math.min(wrap.height - tip.offsetHeight - 8, p.y - 36))}px`;
   }
 
   function hideTooltip() { if (!state.drag && !state.panDrag) { state.hoverIndex = null; $("chartTooltip").classList.add("hidden"); drawChart(); } }
@@ -583,7 +670,9 @@
 
   bindFileInput("plrFile", "plrFile", "plrFileName"); bindFileInput("excelFile", "excelFile", "excelFileName");
   $("importBtn").addEventListener("click", loadFiles); $("loadDemoBtn").addEventListener("click", loadDemo);
-  $("channelSelect").addEventListener("change", e => { state.activeChannel = Number(e.target.value); state.page = 0; renderAll(false); });
+  $("channelSelect").addEventListener("change", e => setActiveChannel(e.target.value));
+  $("showOnlyActiveBtn").addEventListener("click", () => { state.displayChannels = [state.activeChannel]; renderChannelControls(); renderChartTitle(); drawChart(); });
+  $("showAllChannelsBtn").addEventListener("click", () => { state.displayChannels = state.session.usableChannels.slice(); renderChannelControls(); renderChartTitle(); drawChart(); });
   $("rangeStart").addEventListener("input", () => { normalizeSelection(); renderRange(); renderStats(); drawChart(); });
   $("rangeEnd").addEventListener("input", () => { normalizeSelection(); renderRange(); renderStats(); drawChart(); });
   $("selectAllBtn").addEventListener("click", () => { $("rangeStart").value = 0; $("rangeEnd").value = state.session.rows.length - 1; normalizeSelection(); renderAll(false); });

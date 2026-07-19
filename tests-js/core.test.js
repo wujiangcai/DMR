@@ -326,5 +326,12 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.equal((await health.json()).application, "DMR Curve Studio");
   assert.equal((await fetch(`http://127.0.0.1:${port}/core.js`)).status, 200);
   assert.equal((await fetch(`http://127.0.0.1:${port}/fixtures/DAT0131.PLR`)).status, 200);
+  const indexHtml = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+  assert.match(indexHtml, /id="channelDisplayList"/);
+  assert.match(indexHtml, /id="showAllChannelsBtn"/);
+  assert.match(indexHtml, /id="chartChannelLegend"/);
+  const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
+  assert.match(appScript, /displayChannels/);
+  assert.match(appScript, /normalizedDisplayChannels/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });
