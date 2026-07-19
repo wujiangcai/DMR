@@ -81,6 +81,18 @@ function maximumWindowFluctuation(values, start, end, windowPoints) {
   return maximum;
 }
 
+function correlation(left, right) {
+  const count = Math.min(left.length, right.length);
+  const leftMean = left.slice(0, count).reduce((sum, value) => sum + value, 0) / count;
+  const rightMean = right.slice(0, count).reduce((sum, value) => sum + value, 0) / count;
+  let covariance = 0, leftVariance = 0, rightVariance = 0;
+  for (let index = 0; index < count; index++) {
+    const a = left[index] - leftMean, b = right[index] - rightMean;
+    covariance += a * b; leftVariance += a * a; rightVariance += b * b;
+  }
+  return covariance / Math.sqrt(leftVariance * rightVariance);
+}
+
 test("解析 DMR Excel，识别通道和无效温度", () => {
   const rows = [
     ["编号", "时间", "通道01(℃)", "通道02(℃)"],
@@ -192,6 +204,68 @@ test("真实燃烧保温修复满足每小时窗口温差不超过 5℃", () => 
   assert.ok(maximumWindowFluctuation(result, start, end, windowPoints) <= 5 + 1e-9);
 });
 
+test("多通道协同燃烧修复产生高度相关但不完全相同的共同波动", () => {
+  const count = 240;
+  const source = {
+    1: Array.from({ length: count }, (_, index) => 100 + index * 0.045 + 1.1 * Math.sin(index / 11) + 0.35 * Math.sin(index / 3)),
+    2: Array.from({ length: count }, (_, index) => 107 + index * 0.052 + 1.4 * Math.sin((index + 2) / 12) + 0.3 * Math.sin(index / 4)),
+    3: Array.from({ length: count }, (_, index) => 94 + index * 0.04 + 0.9 * Math.sin((index - 3) / 10) + 0.4 * Math.sin(index / 5)),
+  };
+  const operation = {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 5, amplitude: 1.5, preserveRatio: 0.4,
+    sharedRatio: 0.88, trendSyncRatio: 0.82, channelVariation: 0.08,
+    correlationMinutes: 18, eventsPerHour: 0.8, transitionMinutes: 8,
+    onlyViolations: false, seed: "coordinated-heating",
+  };
+  const first = core.applyCoordinatedOperation(source, 20, 220, operation);
+  const repeated = core.applyCoordinatedOperation(source, 20, 220, operation);
+  assert.deepEqual(repeated, first);
+
+  const increments = channel => first[channel].slice(21, 221).map((value, index) => value - first[channel][index + 20]);
+  assert.ok(correlation(increments(1), increments(2)) > 0.9);
+  assert.ok(correlation(increments(1), increments(3)) > 0.9);
+  assert.notDeepEqual(first[1].slice(20, 221), first[2].slice(20, 221));
+  for (const channel of [1, 2, 3]) {
+    assert.ok(maximumWindowRise(first[channel], 20, 220, 30) <= 5 + 1e-9);
+    assert.deepEqual(first[channel].slice(0, 20), source[channel].slice(0, 20));
+    assert.deepEqual(first[channel].slice(221), source[channel].slice(221));
+  }
+});
+
+test("多通道仅修复违规段使用联合违规掩码并保持远端数据", () => {
+  const source = { 1: Array(180).fill(800), 2: Array(180).fill(812), 3: Array(180).fill(794) };
+  for (let index = 75; index <= 100; index++) source[1][index] += 9 * Math.sin((index - 75) / 4);
+  const result = core.applyCoordinatedOperation(source, 0, 179, {
+    mode: "realistic_combustion", phase: "holding", intervalMinutes: 2,
+    windowMinutes: 60, maxFluctuation: 5, amplitude: 1.3, preserveRatio: 0.4,
+    sharedRatio: 0.9, trendSyncRatio: 0.85, channelVariation: 0.06,
+    transitionMinutes: 6, onlyViolations: true, seed: "joint-mask",
+  });
+  for (const channel of [1, 2, 3]) {
+    assert.deepEqual(result[channel].slice(0, 40), source[channel].slice(0, 40));
+    assert.deepEqual(result[channel].slice(145), source[channel].slice(145));
+    assert.ok(maximumWindowFluctuation(result[channel], 0, 179, 30) <= 5 + 1e-9);
+  }
+  assert.ok(result[2].slice(40, 145).some((value, index) => Math.abs(value - source[2][index + 40]) > 1e-9));
+  assert.ok(result[3].slice(40, 145).some((value, index) => Math.abs(value - source[3][index + 40]) > 1e-9));
+});
+
+test("多通道协同修复正确处理通道开头的无效温度", () => {
+  const source = {
+    1: Array.from({ length: 100 }, (_, index) => 100 + index * 0.04),
+    2: Array.from({ length: 100 }, (_, index) => index < 8 ? null : 112 + index * 0.04),
+  };
+  const result = core.applyCoordinatedOperation(source, 0, 99, {
+    mode: "realistic_combustion", phase: "holding", intervalMinutes: 2,
+    windowMinutes: 60, maxFluctuation: 5, amplitude: 1.2, sharedRatio: 0.9,
+    trendSyncRatio: 0.85, onlyViolations: false, transitionMinutes: 6, seed: "missing-prefix",
+  });
+  assert.deepEqual(result[2].slice(0, 8), source[2].slice(0, 8));
+  assert.ok(result[2].slice(8).every(value => value == null || value > 100));
+  assert.ok(maximumWindowFluctuation(result[2], 8, 99, 30) <= 5 + 1e-9);
+});
+
 test("仅修复违规段时保留远离违规窗口的合规区", () => {
   const source = Array(200).fill(100);
   for (let index = 90; index <= 110; index++) source[index] = 100 + (index - 90) * 0.5;
@@ -288,21 +362,22 @@ test("DMR 3.20.0 真实回读 Excel 与编辑目标逐点一致", () => {
   assert.equal(result.missing, 0);
 });
 
-test("DMR 3.20.0 回读通过线性、11 点平滑和真实燃烧合规曲线", () => {
+test("DMR 3.20.0 回读通过单通道和多通道协同合规曲线", () => {
   const root = path.join(__dirname, "..");
   const plr = core.parsePlr(fs.readFileSync(path.join(root, "fixtures", "DAT0131.PLR")));
   const excel = core.parseExcelBytes(fs.readFileSync(path.join(root, "fixtures", "curve.xls")));
   const alignment = core.alignExcelToPlr(excel, plr);
   const cases = [
-    ["DAT0131_linear_90_to_110", 20],
-    ["DAT0131_smooth_window_11", 119],
-    ["DAT0131_realistic_heating_5Cph", 100],
+    ["DAT0131_linear_90_to_110", 20, 1],
+    ["DAT0131_smooth_window_11", 119, 1],
+    ["DAT0131_realistic_heating_5Cph", 100, 1],
+    ["DAT0131_coordinated_heating_ch1_ch3_ch5", 299, 1.25],
   ];
-  for (const [name, planned] of cases) {
+  for (const [name, planned, tolerance] of cases) {
     const session = core.buildSession(plr, excel, alignment);
     core.applyProject(session, JSON.parse(fs.readFileSync(path.join(root, "fixtures", "e2e", `${name}_project.json`), "utf8")));
     const exported = core.parseExcelBytes(fs.readFileSync(path.join(root, "fixtures", "e2e", `${name}_DMR_export.xls`)));
-    const result = core.verifyDmrExport(session, exported, { tolerance: 1 });
+    const result = core.verifyDmrExport(session, exported, { tolerance });
     assert.equal(result.passed, true, name);
     assert.equal(result.plannedTotal, planned, name);
     assert.equal(result.plannedMatched, planned, name);
@@ -312,6 +387,16 @@ test("DMR 3.20.0 回读通过线性、11 点平滑和真实燃烧合规曲线", 
       const compliance = core.validateCustomerRequirements(session, session.customerRequirements);
       assert.equal(compliance.passed, true, name);
       assert.ok(compliance.rules[0].maximumObserved <= 5 + 1e-9, name);
+    }
+    if (name === "DAT0131_coordinated_heating_ch1_ch3_ch5") {
+      const compliance = core.validateCustomerRequirements(session, session.customerRequirements);
+      assert.equal(compliance.passed, true, name);
+      assert.equal(compliance.rules.length, 3, name);
+      assert.ok(compliance.rules.every(rule => rule.maximumObserved <= 5 + 1e-9), name);
+      const increments = channel => session.channels[channel].targets.slice(4, 101).map((value, index) => value - session.channels[channel].targets[index + 3]);
+      assert.ok(correlation(increments(1), increments(3)) > 0.95, name);
+      assert.ok(correlation(increments(1), increments(5)) > 0.95, name);
+      assert.equal(result.unchangedMatched, result.unchangedTotal, name);
     }
   }
 });
@@ -330,8 +415,10 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(indexHtml, /id="channelDisplayList"/);
   assert.match(indexHtml, /id="showAllChannelsBtn"/);
   assert.match(indexHtml, /id="chartChannelLegend"/);
+  assert.match(indexHtml, /id="operationScope"/);
   const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
   assert.match(appScript, /displayChannels/);
   assert.match(appScript, /normalizedDisplayChannels/);
+  assert.match(appScript, /applyCoordinatedOperation/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });

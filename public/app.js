@@ -20,7 +20,7 @@
     linear: `<label>起点温度（℃）<input data-op="startValue" type="number" value="90" step="0.1"></label><label>终点温度（℃）<input data-op="endValue" type="number" value="130" step="0.1"></label>`,
     clamp: `<label>最低温度（℃）<input data-op="minimum" type="number" value="95" step="0.1"></label><label>最高温度（℃）<input data-op="maximum" type="number" value="105" step="0.1"></label>`,
     smooth: `<label class="full">平滑窗口（采样点）<input data-op="window" type="number" value="7" min="1" step="2"></label>`,
-    realistic_combustion: `<label>工艺阶段<select data-op="phase"><option value="heating">升温阶段</option><option value="holding">保温阶段</option></select></label><label>校验窗口（分钟）<input data-op="windowMinutes" type="number" value="60" min="1"></label><label>每小时最大升温（℃/h）<input data-op="maxRisePerHour" type="number" value="5" min="0" step="0.1"></label><label>窗口最大温差（℃）<input data-op="maxFluctuation" type="number" value="5" min="0" step="0.1"></label><label>自然波动强度（℃）<input data-op="amplitude" type="number" value="1.5" min="0" step="0.1"></label><label>保留原曲线特征（0～1）<input data-op="preserveRatio" type="number" value="0.65" min="0" max="1" step="0.05"></label><label>波动相关时间（分钟）<input data-op="correlationMinutes" type="number" value="18" min="1"></label><label>燃料扰动次数（次/小时）<input data-op="eventsPerHour" type="number" value="0.7" min="0" step="0.1"></label><label>随机种子<input data-op="seed" value="20260719"></label><label>边界过渡（分钟）<input data-op="transitionMinutes" type="number" value="10" min="0"></label><label class="full check-field"><input data-op="onlyViolations" type="checkbox" checked> 只修复检测到的违规窗口及过渡区</label><label class="full check-field"><input data-op="createRequirement" type="checkbox" checked> 同时把本次限制加入客户验收要求</label><div class="full operation-note">采用相关随机扰动、慢漂移、变周期起伏和少量燃料脉冲，不会像正弦波一样规律；最后投影到客户限制范围。</div>`,
+    realistic_combustion: `<label>工艺阶段<select data-op="phase"><option value="heating">升温阶段</option><option value="holding">保温阶段</option></select></label><label>校验窗口（分钟）<input data-op="windowMinutes" type="number" value="60" min="1"></label><label>每小时最大升温（℃/h）<input data-op="maxRisePerHour" type="number" value="5" min="0" step="0.1"></label><label>窗口最大温差（℃）<input data-op="maxFluctuation" type="number" value="5" min="0" step="0.1"></label><label>自然波动强度（℃）<input data-op="amplitude" type="number" value="1.5" min="0" step="0.1"></label><label>保留原曲线特征（0～1）<input data-op="preserveRatio" type="number" value="0.45" min="0" max="1" step="0.05"></label><label>共同波动比例（0～1）<input data-op="sharedRatio" type="number" value="0.85" min="0" max="1" step="0.05"></label><label>趋势同步比例（0～1）<input data-op="trendSyncRatio" type="number" value="0.8" min="0" max="1" step="0.05"></label><label>通道响应差异（0～0.5）<input data-op="channelVariation" type="number" value="0.08" min="0" max="0.5" step="0.01"></label><label>共同温度调整（℃）<input data-op="commonOffset" type="number" value="0" step="0.1"></label><label>波动相关时间（分钟）<input data-op="correlationMinutes" type="number" value="18" min="1"></label><label>燃料扰动次数（次/小时）<input data-op="eventsPerHour" type="number" value="0.7" min="0" step="0.1"></label><label>随机种子<input data-op="seed" value="20260719"></label><label>边界过渡（分钟）<input data-op="transitionMinutes" type="number" value="10" min="0"></label><label class="full check-field"><input data-op="onlyViolations" type="checkbox" checked> 只修复任一已选通道检测到的违规窗口及过渡区</label><label class="full check-field"><input data-op="createRequirement" type="checkbox" checked> 为每个协同修改通道加入客户验收要求</label><div class="full operation-note">多通道协同时生成一条共同燃烧驱动，通道保持原有温差和少量独立响应；共同波动高度相关但不会完全重合，最后逐通道投影到客户限制范围。</div>`,
     sine: `<label>波动幅度（℃）<input data-op="amplitude" type="number" value="3" step="0.1"></label><label>一个周期点数<input data-op="period" type="number" value="20" min="1"></label>`,
     window_delta_clamp: `<label>时间窗口（分钟）<input data-op="windowMinutes" type="number" value="10" min="1"></label><label>最大温差（℃）<input data-op="maxDelta" type="number" value="5" min="0" step="0.1"></label>`,
   };
@@ -177,7 +177,7 @@
       ? `${channelLabel(state.activeChannel)} 温度曲线`
       : `${channels.length} 个通道叠加曲线 · 当前编辑 ${channelLabel(state.activeChannel)}`;
     $("tableTitle").textContent = `${channelLabel(state.activeChannel)} 温度数据表`;
-    $("applyOperationBtn").textContent = `应用到${channelLabel(state.activeChannel)}选中范围`;
+    renderOperationScopeHint();
   }
 
   function renderChannelControls() {
@@ -201,7 +201,32 @@
     legend.querySelectorAll("[data-edit-channel]").forEach(button => button.addEventListener("click", () => setActiveChannel(button.dataset.editChannel)));
   }
 
-  function renderOperationFields() { $("operationFields").innerHTML = operationDefinitions[$("operationMode").value]; }
+  function operationChannels() {
+    if (!state.session || $("operationScope").value !== "displayed") return [state.activeChannel];
+    return normalizedDisplayChannels();
+  }
+
+  function renderOperationScopeHint() {
+    const scope = $("operationScope"), hint = $("operationScopeHint"), applyButton = $("applyOperationBtn"), restoreButton = $("restoreSelectionBtn");
+    if (!scope || !hint || !applyButton || !restoreButton) return;
+    const channels = state.session ? operationChannels() : [state.activeChannel];
+    const coordinated = scope.value === "displayed" && channels.length > 1;
+    const realistic = $("operationMode").value === "realistic_combustion";
+    hint.classList.toggle("coordinated", coordinated);
+    if (!coordinated) {
+      hint.textContent = `当前操作只修改${channelLabel(state.activeChannel)}；其他展示通道仅用于对比。`;
+      applyButton.textContent = `应用到${channelLabel(state.activeChannel)}选中范围`;
+      restoreButton.textContent = `恢复${channelLabel(state.activeChannel)}选中范围原始值`;
+    } else {
+      hint.textContent = realistic
+        ? `将协同修改 ${channels.map(channelLabel).join("、")}：共享燃烧趋势和波动，同时保留各通道温差与少量独立响应。`
+        : `将同一参数同步应用到 ${channels.length} 个已展示通道；恒温和线性模式会使用相同绝对目标温度。`;
+      applyButton.textContent = realistic ? `协同修复 ${channels.length} 个已展示通道` : `同步应用到 ${channels.length} 个已展示通道`;
+      restoreButton.textContent = `恢复 ${channels.length} 个已展示通道原始值`;
+    }
+  }
+
+  function renderOperationFields() { $("operationFields").innerHTML = operationDefinitions[$("operationMode").value]; renderOperationScopeHint(); }
 
   function readOperation() {
     const operation = { mode: $("operationMode").value, intervalMinutes: state.session.excel.intervalMinutes || 2 };
@@ -241,25 +266,34 @@
   }
 
   function applyBatchOperation() {
-    const snapshot = captureEditState(), series = state.session.channels[state.activeChannel], [a, b] = state.selection;
-    const operation = readOperation();
+    const snapshot = captureEditState(), [a, b] = state.selection, operation = readOperation(), channels = operationChannels();
     try {
-      series.targets = core.applyOperation(series.targets, a, b, operation);
-      if (operation.mode === "realistic_combustion" && operation.createRequirement) {
-        addRequirement(operation.phase, {
-          maxRisePerHour: Number(operation.maxRisePerHour), maxFluctuation: Number(operation.maxFluctuation),
-          windowMinutes: Number(operation.windowMinutes), startIndex: a, endIndex: b, channel: state.activeChannel,
-        }, false);
+      if (channels.length > 1 && operation.mode === "realistic_combustion") {
+        const input = Object.fromEntries(channels.map(channel => [channel, state.session.channels[channel].targets]));
+        const output = core.applyCoordinatedOperation(input, a, b, operation);
+        for (const channel of channels) state.session.channels[channel].targets = output[channel];
+      } else {
+        for (const channel of channels) state.session.channels[channel].targets = core.applyOperation(state.session.channels[channel].targets, a, b, operation);
       }
-      pushUndo(snapshot, $("operationMode").selectedOptions[0].textContent.trim()); renderAll();
-      showToast(`已处理通道${String(state.activeChannel).padStart(2, "0")}的 ${b - a + 1} 个时间点`);
+      if (operation.mode === "realistic_combustion" && operation.createRequirement) {
+        for (const channel of channels) addRequirement(operation.phase, {
+            maxRisePerHour: Number(operation.maxRisePerHour), maxFluctuation: Number(operation.maxFluctuation),
+            windowMinutes: Number(operation.windowMinutes), startIndex: a, endIndex: b, channel,
+          }, false);
+      }
+      const label = channels.length > 1 ? `多通道协同：${$("operationMode").selectedOptions[0].textContent.trim()}` : $("operationMode").selectedOptions[0].textContent.trim();
+      pushUndo(snapshot, label); renderAll();
+      showToast(`已处理 ${channels.map(channelLabel).join("、")} 的 ${b - a + 1} 个时间点`);
     } catch (error) { showToast(error.message, 4200); }
   }
 
   function restoreSelection() {
-    const snapshot = captureEditState(), series = state.session.channels[state.activeChannel], [a, b] = state.selection;
-    for (let i = a; i <= b; i++) series.targets[i] = series.original[i];
-    pushUndo(snapshot, "恢复原始值"); renderAll();
+    const snapshot = captureEditState(), [a, b] = state.selection, channels = operationChannels();
+    for (const channel of channels) {
+      const series = state.session.channels[channel];
+      for (let i = a; i <= b; i++) series.targets[i] = series.original[i];
+    }
+    pushUndo(snapshot, `恢复 ${channels.map(channelLabel).join("、")} 原始值`); renderAll();
   }
 
   function requirementId() { return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`; }
@@ -682,7 +716,7 @@
   $("zoomInBtn").addEventListener("click", () => zoomView(0.72)); $("zoomOutBtn").addEventListener("click", () => zoomView(1.38));
   $("panPrevBtn").addEventListener("click", () => panView(-Math.max(1, Math.round((state.view[1] - state.view[0]) * .7))));
   $("panNextBtn").addEventListener("click", () => panView(Math.max(1, Math.round((state.view[1] - state.view[0]) * .7))));
-  $("operationMode").addEventListener("change", renderOperationFields); $("applyOperationBtn").addEventListener("click", applyBatchOperation); $("restoreSelectionBtn").addEventListener("click", restoreSelection);
+  $("operationMode").addEventListener("change", renderOperationFields); $("operationScope").addEventListener("change", renderOperationScopeHint); $("applyOperationBtn").addEventListener("click", applyBatchOperation); $("restoreSelectionBtn").addEventListener("click", restoreSelection);
   $("undoBtn").addEventListener("click", undo); $("redoBtn").addEventListener("click", redo);
   $("prevPage").addEventListener("click", () => { state.page--; renderTable(); }); $("nextPage").addEventListener("click", () => { state.page++; renderTable(); });
   $("drawModeBtn").addEventListener("click", () => { state.drawEnabled = !state.drawEnabled; $("drawModeBtn").classList.toggle("active", state.drawEnabled); $("drawModeBtn").textContent = state.drawEnabled ? "✦ 拖动绘制" : "↔ 平移查看"; $("curveCanvas").style.cursor = state.drawEnabled ? "crosshair" : "grab"; });

@@ -133,6 +133,15 @@ SHA256 9F4709D705F920CA09F0E1A3228C9586A11EE6C38C62B408C28F99E01A3A1A40
 
 fixtures/e2e/DAT0131_realistic_heating_5Cph_project.json
 SHA256 7DB0AF996767EDD6546B3E3CC5A72AC897EE521F52CB747DB4DBAC76185F9908
+
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5.PLR
+SHA256 A343C52A4F58E48D251B284B0D41CAE692B0FC37F7019C2DC3F9549D6D988407
+
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5_DMR_export.xls
+SHA256 AD348167956A24C58264906A8694D26E2E28FDAB9BAD27B4AF230415E605F7F3
+
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5_project.json
+SHA256 C46FF195C238FD8F6FE8E82AE3B61B363C4CA1CCDC432EAF3471237B136E0400
 ```
 
 ## 7. 自动化回归
@@ -143,17 +152,18 @@ SHA256 7DB0AF996767EDD6546B3E3CC5A72AC897EE521F52CB747DB4DBAC76185F9908
 npm.cmd test
 ```
 
-测试会重新载入原始 PLR/Excel和保存的项目 JSON，然后逐时间、逐通道比对单点、线性、平滑、真实燃烧四组 DMR 回读 Excel。
+测试会重新载入原始 PLR/Excel和保存的项目 JSON，然后逐时间、逐通道比对单点、线性、平滑、单通道真实燃烧和多通道协同燃烧五组 DMR 回读 Excel。
 
 ## 8. 批量编辑追加验收
 
-在单点闭环通过后，又实际生成、打开并由 DMR 导出了两类批量曲线：
+在单点闭环通过后，又实际生成、打开并由 DMR 导出了四类批量曲线：
 
-| 用例 | 时间范围 | Curve Studio 目标点 | DMR 回读结果（容差 1℃） | 其他有效点 |
+| 用例 | 时间范围 | Curve Studio 目标点 | DMR 回读结果 | 其他有效点 |
 |---|---|---:|---:|---:|
 | 线性 90℃ -> 110℃ | 2023-11-06 15:40 ～ 16:18 | 20 | 20/20 命中 | 20826/20826 保持 |
 | 11 点滑动平滑 | 2023-11-07 06:00 ～ 10:00 | 119 | 119/119 命中 | 20727/20727 保持 |
 | 真实燃烧升温合规修复，限制 5℃/h | 2023-11-06 10:00 ～ 13:20 | 100 | 100/100 命中 | 20746/20746 保持 |
+| 通道01/03/05协同燃烧升温，限制 5℃/h | 2023-11-06 10:00 ～ 13:20 | 299 | 299/299 命中 | 20547/20547 保持 |
 
 回归文件：
 
@@ -169,9 +179,13 @@ fixtures/e2e/DAT0131_smooth_window_11_DMR_export.xls
 fixtures/e2e/DAT0131_realistic_heating_5Cph.PLR
 fixtures/e2e/DAT0131_realistic_heating_5Cph_project.json
 fixtures/e2e/DAT0131_realistic_heating_5Cph_DMR_export.xls
+
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5.PLR
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5_project.json
+fixtures/e2e/DAT0131_coordinated_heating_ch1_ch3_ch5_DMR_export.xls
 ```
 
-DMR 当前通道按整数温度导出，因此带小数的线性、平滑、真实燃烧目标使用 1℃（即显示分辨率）容差。全部计划点命中，全部原本有效的非目标点保持。
+DMR 当前通道按整数温度导出，因此带小数的线性、平滑、单通道真实燃烧目标使用 1℃显示容差；多通道协同用例使用 1.25℃容差。全部计划点命中，全部原本有效的非目标点保持。
 
 真实燃烧用例还通过客户升温规则校验：
 
@@ -186,6 +200,22 @@ PLR 文件长度：76238 字节
 实际计划修改：100 点
 非目标字节：0
 ```
+
+多通道协同用例真实结果：
+
+```text
+协同通道：通道01、通道03、通道05
+规则范围：2023-11-06 10:00:00 ～ 13:20:00
+三通道最大观测升温：4.0931 / 4.2402 / 4.1048℃/h
+通道增量两两相关系数：0.9886 ～ 0.9994
+计划修改：299 点
+DMR 回读命中：299/299（容差 1.25℃）
+原本有效的非目标点：20547/20547 保持
+文件长度：76238 字节
+非目标字节：0
+```
+
+协同用例使用 `1.25℃` 回读容差，是因为 DMR 当前通道按整数温度导出，而 PLR/原 Excel 本身在部分测点存在约 `0.7℃` 的解释残差；实际最大回读差约 `1.003℃`。该容差只用于显示值闭环，字节级写入仍严格限定在299个计划字段内。
 
 开发用自动导出脚本：
 
@@ -203,4 +233,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dmr_e2e_export.ps1 `
 真实 PLR -> Curve Studio 编辑温度 -> 新 PLR -> DMR 3.20 打开 -> DMR Excel 导出 -> 目标逐点匹配
 ```
 
-单点、线性、滑动平滑和真实燃烧升温合规修复四个用例均通过。
+单点、线性、滑动平滑、单通道真实燃烧升温和多通道协同燃烧升温五个用例均通过。

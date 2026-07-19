@@ -432,6 +432,166 @@
       : enforceHoldingFluctuation(result, lo, hi, windowPoints, maxFluctuation);
   }
 
+  function applyCoordinatedOperation(seriesByChannel, start, end, operation = {}) {
+    const entries = Object.entries(seriesByChannel || {}).filter(([, values]) => Array.isArray(values));
+    assert(entries.length > 0, "多通道协同修复至少需要一个通道");
+    const length = entries[0][1].length;
+    assert(entries.every(([, values]) => values.length === length), "协同修复的各通道点数必须一致");
+    if (operation.mode !== "realistic_combustion" || entries.length === 1) {
+      return Object.fromEntries(entries.map(([channel, values]) => [channel, applyOperation(values, start, end, operation)]));
+    }
+
+    const lo = Math.max(0, Math.min(length - 1, Math.min(start, end)));
+    const hi = Math.max(0, Math.min(length - 1, Math.max(start, end)));
+    const number = (key, fallback = 0) => Number.isFinite(Number(operation[key])) ? Number(operation[key]) : fallback;
+    const interval = Math.max(0.01, number("intervalMinutes", 2));
+    const phase = operation.phase === "holding" ? "holding" : "heating";
+    const windowMinutes = Math.max(interval, number("windowMinutes", 60));
+    const windowPoints = Math.max(1, Math.round(windowMinutes / interval));
+    const maxRise = Math.max(0, number("maxRisePerHour", 5)) * windowMinutes / 60;
+    const maxFluctuation = Math.max(0, number("maxFluctuation", 5));
+    const amplitude = Math.max(0, number("amplitude", phase === "holding" ? 1.2 : 1.8));
+    const preserve = clamp(number("preserveRatio", 0.45), 0, 1);
+    const sharedRatio = clamp(number("sharedRatio", 0.85), 0, 1);
+    const trendSyncRatio = clamp(number("trendSyncRatio", 0.8), 0, 1);
+    const channelVariation = clamp(number("channelVariation", 0.08), 0, 0.5);
+    const commonOffset = number("commonOffset", 0);
+    const correlationMinutes = Math.max(interval, number("correlationMinutes", 18));
+    const trendMinutes = Math.max(interval, number("trendMinutes", phase === "holding" ? 45 : 90));
+    const eventsPerHour = Math.max(0, number("eventsPerHour", 0.7));
+    const transitionMinutes = Math.max(0, number("transitionMinutes", 10));
+    const transitionPoints = Math.round(transitionMinutes / interval);
+    const onlyViolations = operation.onlyViolations === true || String(operation.onlyViolations).toLowerCase() === "true";
+    const seed = operation.seed == null || operation.seed === "" ? "20260719" : operation.seed;
+    const random = seededRandom(`${seed}|coordinated`);
+    const trendWindow = Math.max(3, Math.round(trendMinutes / interval) | 1);
+
+    const baselines = {}, ownResiduals = {}, amplitudeScales = {}, baselineAnchors = {};
+    for (const [channel, values] of entries) {
+      const baseline = movingAverageSegment(values, lo, hi, trendWindow);
+      baselines[channel] = baseline;
+      ownResiduals[channel] = values.map((value, index) => Number.isFinite(value) && Number.isFinite(baseline[index])
+        ? clamp(value - baseline[index], -amplitude * 1.8, amplitude * 1.8)
+        : 0);
+      const variationRandom = seededRandom(`${seed}|variation|${channel}`);
+      amplitudeScales[channel] = 1 + (variationRandom() * 2 - 1) * channelVariation;
+      let anchorIndex = lo;
+      while (anchorIndex <= hi && (!Number.isFinite(values[anchorIndex]) || !Number.isFinite(baseline[anchorIndex]))) anchorIndex++;
+      baselineAnchors[channel] = anchorIndex <= hi ? { index: anchorIndex, value: values[anchorIndex] } : null;
+    }
+
+    const commonTrend = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      const deltas = [];
+      for (const [channel] of entries) {
+        const anchor = baselineAnchors[channel];
+        if (anchor && i >= anchor.index && Number.isFinite(baselines[channel][i])) deltas.push(baselines[channel][i] - anchor.value);
+      }
+      commonTrend[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : 0;
+    }
+
+    const rho = Math.exp(-interval / correlationMinutes);
+    const slowRho = Math.exp(-interval / (correlationMinutes * 5));
+    let ou = gaussianRandom(random) * amplitude * 0.35;
+    let slow = gaussianRandom(random) * amplitude * 0.15;
+    let pulse = 0, phaseAngle = random() * 2 * Math.PI, wanderingPeriod = 35 + random() * 100;
+    const sharedResidual = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      ou = rho * ou + Math.sqrt(Math.max(0, 1 - rho * rho)) * gaussianRandom(random) * amplitude;
+      slow = slowRho * slow + Math.sqrt(Math.max(0, 1 - slowRho * slowRho)) * gaussianRandom(random) * amplitude * 0.45;
+      wanderingPeriod = clamp(wanderingPeriod + gaussianRandom(random) * 1.8, 25, 180);
+      phaseAngle += 2 * Math.PI * interval / wanderingPeriod;
+      if (random() < eventsPerHour * interval / 60) pulse += (random() * 2 - 1) * amplitude * (0.35 + random() * 0.75);
+      pulse *= 0.82 + random() * 0.14;
+      const irregularCycle = Math.sin(phaseAngle + 0.28 * Math.sin(phaseAngle * 0.37)) * amplitude * 0.32;
+      sharedResidual[i] = clamp(ou * 0.48 + slow * 0.22 + irregularCycle + pulse, -amplitude * 2.1, amplitude * 2.1);
+    }
+
+    let mask = Array(length).fill(true);
+    if (onlyViolations) {
+      mask = Array(length).fill(false);
+      for (const [, values] of entries) {
+        const channelMask = detectViolationMask(values, lo, hi, phase, windowPoints, phase === "heating" ? maxRise : maxFluctuation);
+        for (let i = lo; i <= hi; i++) mask[i] = mask[i] || channelMask[i];
+      }
+      mask = expandMask(mask, lo, hi, transitionPoints);
+    }
+
+    const output = {};
+    for (const [channel, values] of entries) {
+      const result = values.slice();
+      const individualRandom = seededRandom(`${seed}|individual|${channel}`);
+      const individualRho = Math.exp(-interval / Math.max(interval, correlationMinutes * 0.7));
+      let individual = gaussianRandom(individualRandom) * amplitude * 0.25;
+      const baselineAnchor = baselineAnchors[channel];
+      if (!baselineAnchor) { output[channel] = result; continue; }
+      for (let i = lo; i <= hi; i++) {
+        if (!mask[i] || !Number.isFinite(values[i]) || !Number.isFinite(baselines[channel][i])) continue;
+        individual = individualRho * individual + Math.sqrt(Math.max(0, 1 - individualRho * individualRho)) * gaussianRandom(individualRandom) * amplitude * 0.55;
+        const synchronizedTrend = baselineAnchor.value + commonTrend[i] - commonTrend[baselineAnchor.index];
+        const trend = (1 - trendSyncRatio) * baselines[channel][i] + trendSyncRatio * synchronizedTrend;
+        const independentResidual = preserve * ownResiduals[channel][i] + (1 - preserve) * individual;
+        const residual = sharedRatio * sharedResidual[i] * amplitudeScales[channel] + (1 - sharedRatio) * independentResidual;
+        result[i] = trend + commonOffset + residual;
+      }
+
+      if (transitionPoints > 0) {
+        for (let i = lo; i <= Math.min(hi, lo + transitionPoints); i++) {
+          if (!mask[i] || !Number.isFinite(result[i]) || !Number.isFinite(values[i])) continue;
+          const weight = (i - lo) / Math.max(1, transitionPoints);
+          result[i] = values[i] * (1 - weight) + result[i] * weight;
+        }
+        for (let i = Math.max(lo, hi - transitionPoints); i <= hi; i++) {
+          if (!mask[i] || !Number.isFinite(result[i]) || !Number.isFinite(values[i])) continue;
+          const weight = (hi - i) / Math.max(1, transitionPoints);
+          result[i] = values[i] * (1 - weight) + result[i] * weight;
+        }
+      }
+      output[channel] = result;
+    }
+
+    if (phase === "holding") {
+      for (const [channel] of entries) output[channel] = enforceHoldingFluctuation(output[channel], lo, hi, windowPoints, maxFluctuation);
+      return output;
+    }
+
+    const outputAnchors = {};
+    for (const [channel] of entries) {
+      let index = lo;
+      while (index <= hi && !Number.isFinite(output[channel][index])) index++;
+      outputAnchors[channel] = index <= hi ? { index, value: output[channel][index] } : null;
+    }
+    const rawGroupDriver = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      const deltas = [];
+      for (const [channel] of entries) {
+        const anchor = outputAnchors[channel];
+        if (anchor && i >= anchor.index && Number.isFinite(output[channel][i])) deltas.push(output[channel][i] - anchor.value);
+      }
+      rawGroupDriver[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : (i > lo ? rawGroupDriver[i - 1] : 0);
+    }
+    const constrainedGroupDriver = enforceHeatingRate(
+      rawGroupDriver, lo, hi, windowPoints, maxRise * 0.82,
+      seededRandom(`${seed}|group-constraint`), onlyViolations ? mask : null,
+    );
+    const independentWeight = Math.max(0.06, Math.min(0.25, 1 - sharedRatio));
+    for (const [channel] of entries) {
+      const anchor = outputAnchors[channel];
+      if (!anchor) continue;
+      for (let i = lo; i <= hi; i++) {
+        if ((onlyViolations && !mask[i]) || i < anchor.index || !Number.isFinite(output[channel][i])) continue;
+        const rawCommon = anchor.value + rawGroupDriver[i] - rawGroupDriver[anchor.index];
+        const independent = clamp(output[channel][i] - rawCommon, -amplitude * 1.5, amplitude * 1.5);
+        output[channel][i] = anchor.value + constrainedGroupDriver[i] - constrainedGroupDriver[anchor.index] + independent * independentWeight;
+      }
+      output[channel] = enforceHeatingRate(
+        output[channel], lo, hi, windowPoints, maxRise,
+        seededRandom(`${seed}|final-constraint`), onlyViolations ? mask : null,
+      );
+    }
+    return output;
+  }
+
   function applyOperation(values, start, end, operation = {}) {
     const result = values.slice();
     const lo = Math.max(0, Math.min(values.length - 1, Math.min(start, end)));
@@ -758,6 +918,7 @@
     cloneTargets,
     restoreTargets,
     applyOperation,
+    applyCoordinatedOperation,
     validateCustomerRequirements,
     buildEditPlan,
     createModifiedPlr,

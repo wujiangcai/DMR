@@ -104,6 +104,13 @@
               <option value="window_delta_clamp">限制单位时间温差</option>
             </select>
           </label>
+          <label class="wide-label">应用通道范围
+            <select id="operationScope">
+              <option value="active">仅当前编辑通道（安全）</option>
+              <option value="displayed">全部已展示通道（共同调整）</option>
+            </select>
+          </label>
+          <div id="operationScopeHint" class="scope-hint">当前操作只修改当前编辑通道。</div>
           <div id="operationFields" class="operation-fields"></div>
           <button id="applyOperationBtn" class="primary wide">应用到选中范围</button>
           <button id="restoreSelectionBtn" class="ghost wide">恢复选中范围原始值</button>
