@@ -1,0 +1,185 @@
+{
+  "source": "C:\\Users\\caiwujiang\\Documents\\xwechat_files\\wxid_eowf0xmbz0tr22_e9a1\\msg\\file\\2026-07\\DAT0131.PLR",
+  "source_sha256": "596576cd37f239852fa084f289b2c328f4bafb25c78d25825c50a3a3345a2744",
+  "data_offset": 20342,
+  "record_size": 24,
+  "record_count": 2329,
+  "channel_count": 12,
+  "original_first_record_i16": [
+    0,
+    3637,
+    3878,
+    3851,
+    3698,
+    3633,
+    3346,
+    3331,
+    3396,
+    3886,
+    0,
+    0
+  ],
+  "files": [
+    {
+      "name": "DAT0131_probe_first_field_00_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 0,
+      "patch_offset": 20342,
+      "old_i16": 0,
+      "new_i16": 30000,
+      "sha256": "06661f54b1eb278324e191b65538f02588dcd7cd0744124fa44d13480b85165e"
+    },
+    {
+      "name": "DAT0131_probe_first_field_01_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 1,
+      "patch_offset": 20344,
+      "old_i16": 3637,
+      "new_i16": 30000,
+      "sha256": "5486244884ee89d1834dcc8e3db55b6de7eb4151ebe1e3946add7d474ab6e20a"
+    },
+    {
+      "name": "DAT0131_probe_first_field_02_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 2,
+      "patch_offset": 20346,
+      "old_i16": 3878,
+      "new_i16": 30000,
+      "sha256": "96c9da0d182664cb12f33e9086ed163cabc8aa36d3b98ef3028ecb083149b827"
+    },
+    {
+      "name": "DAT0131_probe_first_field_03_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 3,
+      "patch_offset": 20348,
+      "old_i16": 3851,
+      "new_i16": 30000,
+      "sha256": "e690deebcabf549eadd74f948e0ba50a0ca1ca4ede007fbfe6b25b269a1d37c2"
+    },
+    {
+      "name": "DAT0131_probe_first_field_04_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 4,
+      "patch_offset": 20350,
+      "old_i16": 3698,
+      "new_i16": 30000,
+      "sha256": "4c1dacc8b845baa3215bbe00bf788ede21e19fce6ae4dc230eb88d3ee4b43fb5"
+    },
+    {
+      "name": "DAT0131_probe_first_field_05_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 5,
+      "patch_offset": 20352,
+      "old_i16": 3633,
+      "new_i16": 30000,
+      "sha256": "9d90c92999e284bde4a2e334d00462b3f7d6726fd446f2620ab86bb9d49ff058"
+    },
+    {
+      "name": "DAT0131_probe_first_field_06_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 6,
+      "patch_offset": 20354,
+      "old_i16": 3346,
+      "new_i16": 30000,
+      "sha256": "9a9fe3d4c20451580e47e0f431c30a4d9973e34954419972e03d48cebdc04df6"
+    },
+    {
+      "name": "DAT0131_probe_first_field_07_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 7,
+      "patch_offset": 20356,
+      "old_i16": 3331,
+      "new_i16": 30000,
+      "sha256": "58f3fbbb81077e34ef5bc53280a83f1d99a04a2ea7c62673c4f718e1a393384d"
+    },
+    {
+      "name": "DAT0131_probe_first_field_08_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 8,
+      "patch_offset": 20358,
+      "old_i16": 3396,
+      "new_i16": 30000,
+      "sha256": "bd224b6fc3287f512bde5f068ad87390eb1d49eb4f25a823d2b49f5603ce5bb2"
+    },
+    {
+      "name": "DAT0131_probe_first_field_09_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 9,
+      "patch_offset": 20360,
+      "old_i16": 3886,
+      "new_i16": 30000,
+      "sha256": "0d021291f0f00524d091afa1dec7ddb4de4ba07fa66702dab2e362a2dd810c0d"
+    },
+    {
+      "name": "DAT0131_probe_first_field_10_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 10,
+      "patch_offset": 20362,
+      "old_i16": 0,
+      "new_i16": 30000,
+      "sha256": "3cb1aa1794243d4c189175f4ef1f8232449ffdcc5e2712c8f628cdd53567eaa9"
+    },
+    {
+      "name": "DAT0131_probe_first_field_11_to_30000.PLR",
+      "type": "first-record-single-field",
+      "field_index_zero_based": 11,
+      "patch_offset": 20364,
+      "old_i16": 0,
+      "new_i16": 30000,
+      "sha256": "c7c0b595e2ffbf49de66d978f3d38b6e81e5d956a9dc376b1532b06f2e72bebb"
+    },
+    {
+      "name": "DAT0131_probe_first_record_step_values.PLR",
+      "type": "first-record-all-fields-step",
+      "patch_offset_start": 20342,
+      "old_i16": [
+        0,
+        3637,
+        3878,
+        3851,
+        3698,
+        3633,
+        3346,
+        3331,
+        3396,
+        3886,
+        0,
+        0
+      ],
+      "new_i16": [
+        1000,
+        3000,
+        5000,
+        7000,
+        9000,
+        11000,
+        13000,
+        15000,
+        17000,
+        19000,
+        21000,
+        23000
+      ],
+      "sha256": "f3c284d01391b636e5b4eb794e7949d80e2b695455a8ddeeb25c8f8172828538"
+    },
+    {
+      "name": "DAT0131_probe_field_00_first_10_rows_ramp.PLR",
+      "type": "field-00-first-10-rows-ramp",
+      "field_index_zero_based": 0,
+      "row_count": 10,
+      "new_i16": [
+        1000,
+        4000,
+        7000,
+        10000,
+        13000,
+        16000,
+        19000,
+        22000,
+        25000,
+        28000
+      ],
+      "sha256": "dac1ef0c09512255660ab33f23e360853f3e80cca9ef4753fb4138dfbf9b225b"
+    }
+  ]
+}

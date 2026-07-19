@@ -1,0 +1,37 @@
+{
+  "input": {
+    "plr": "C:/Users/caiwujiang/Documents/xwechat_files/wxid_eowf0xmbz0tr22_e9a1/msg/file/2026-07/DAT0131.PLR",
+    "excel": "C:/Users/caiwujiang/Documents/曲线.xls",
+    "output": "C:/Users/caiwujiang/Desktop/项目/DMR分析/outputs/DAT0131_window_delta_test.PLR"
+  },
+  "plr_format": {
+    "data_offset": 4214,
+    "record_size": 24,
+    "total_records": 3001,
+    "interval_minutes": 2,
+    "buffer_start": "2023-11-05 13:30:00",
+    "anchor_time": "2023-11-06 15:42:00",
+    "anchor_record_index": 700,
+    "raw_per_celsius": 48,
+    "valid_channels": [1, 2, 3]
+  },
+  "rules": [
+    {
+      "channel": 1,
+      "start": "2023-11-06 15:42:00",
+      "end": "2023-11-06 16:18:00",
+      "mode": "window_delta_clamp",
+      "window_minutes": 10,
+      "max_delta": 5,
+      "auto_preserve_drop": {
+        "enabled": true,
+        "min_drop": 8,
+        "within_minutes": 10,
+        "extend_before_minutes": 0,
+        "extend_after_minutes": 30,
+        "reason": "自动识别停火骤降，保留原始曲线"
+      },
+      "preserve_ranges": []
+    }
+  ]
+}

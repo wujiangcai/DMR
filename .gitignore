@@ -1,0 +1,9 @@
+node_modules/
+__pycache__/
+*.py[cod]
+.local-fixtures/
+.playwright-cli/
+output/playwright/
+outputs/
+*.log
+*.pid

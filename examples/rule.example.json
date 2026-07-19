@@ -1,0 +1,29 @@
+{
+  "input": {
+    "plr": "C:/Users/caiwujiang/Documents/xwechat_files/wxid_eowf0xmbz0tr22_e9a1/msg/file/2026-07/DAT0131.PLR",
+    "excel": "C:/Users/caiwujiang/Documents/曲线.xls",
+    "output": "C:/Users/caiwujiang/Desktop/项目/DMR分析/outputs/DAT0131_modified_test.PLR"
+  },
+  "plr_format": {
+    "data_offset": 4214,
+    "record_size": 24,
+    "total_records": 3001,
+    "interval_minutes": 2,
+    "buffer_start": "2023-11-05 13:30:00",
+    "anchor_time": "2023-11-06 15:42:00",
+    "anchor_record_index": 700,
+    "raw_per_celsius": 48,
+    "valid_channels": [1, 2, 3]
+  },
+  "rules": [
+    {
+      "channel": 1,
+      "start": "2023-11-06 15:42:00",
+      "end": "2023-11-06 16:18:00",
+      "mode": "absolute_clamp",
+      "absolute_min": 95,
+      "absolute_max": 105,
+      "preserve_ranges": []
+    }
+  ]
+}

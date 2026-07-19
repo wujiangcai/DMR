@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DMR Curve Studio · 温度曲线编辑器</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d776d'/%3E%3Cpath d='M14 43V21h15c14 0 21 4 21 11s-7 11-21 11H14zm11-7h5c6 0 9-1 9-4s-3-4-9-4h-5v8z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">D</div>
+    <div>
+      <h1>DMR Curve Studio</h1>
+      <p>把 DMR 的历史数据变成真正可以编辑、验证和交付的温度曲线</p>
+    </div>
+    <div class="top-actions">
+      <button id="undoBtn" class="ghost" disabled title="Ctrl+Z">撤销</button>
+      <button id="redoBtn" class="ghost" disabled title="Ctrl+Y">重做</button>
+      <span id="saveState" class="save-state">尚未载入</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="workflow" aria-label="工作流程">
+      <div class="step active" id="step1"><span>1</span><b>载入</b><small>PLR + Excel</small></div>
+      <div class="step" id="step2"><span>2</span><b>编辑</b><small>拖动或批量生成</small></div>
+      <div class="step" id="step3"><span>3</span><b>校验</b><small>字节级检查</small></div>
+      <div class="step" id="step4"><span>4</span><b>交付</b><small>PLR / PNG / CSV</small></div>
+    </section>
+
+    <section class="card import-card" id="importCard">
+      <div class="section-heading">
+        <div><span class="eyebrow">数据源</span><h2>载入同一次记录的两个文件</h2></div>
+        <button id="loadDemoBtn" class="ghost small">载入项目示例</button>
+      </div>
+      <div class="drop-grid">
+        <label class="file-drop" id="plrDrop">
+          <input id="plrFile" type="file" accept=".plr,.PLR,application/octet-stream">
+          <span class="file-icon">PLR</span>
+          <strong>DMR 原始历史文件</strong>
+          <small id="plrFileName">点击选择或拖入 .PLR</small>
+        </label>
+        <label class="file-drop" id="excelDrop">
+          <input id="excelFile" type="file" accept=".xls,.xlsx,.XLS,.XLSX">
+          <span class="file-icon excel">XLS</span>
+          <strong>DMR 导出的原始 Excel</strong>
+          <small id="excelFileName">用于时间、温度和通道自动对齐</small>
+        </label>
+      </div>
+      <details class="advanced">
+        <summary>高级格式参数（当前 VX5300 样本可保持默认）</summary>
+        <div class="field-row compact">
+          <label>数据区偏移<input id="dataOffset" type="number" placeholder="自动：文件尾反推"></label>
+          <label>单条记录字节<input id="recordSize" type="number" value="24"></label>
+          <label>环形记录数<input id="totalRecords" type="number" value="3001"></label>
+          <label>raw / ℃<input id="rawScale" type="number" value="48" step="0.01"></label>
+        </div>
+      </details>
+      <div class="import-footer">
+        <div id="importMessage" class="message neutral">原文件永远只读；输出时生成新的 PLR 副本。</div>
+        <button id="importBtn" class="primary" disabled>解析并建立可编辑曲线</button>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <aside class="sidebar">
+        <section class="card panel">
+          <span class="eyebrow">当前曲线</span>
+          <label class="wide-label">编辑通道<select id="channelSelect"></select></label>
+          <div class="legend"><span class="line original"></span>原始温度 <span class="line target"></span>编辑结果</div>
+          <div class="stat-grid">
+            <div><small>最低</small><b id="statMin">—</b></div>
+            <div><small>最高</small><b id="statMax">—</b></div>
+            <div><small>平均</small><b id="statAvg">—</b></div>
+            <div><small>已改点</small><b id="statChanged">0</b></div>
+          </div>
+        </section>
+
+        <section class="card panel">
+          <span class="eyebrow">编辑范围</span>
+          <div class="range-label"><b id="rangeStartText">—</b><span>至</span><b id="rangeEndText">—</b></div>
+          <label class="slider-label">起点<input id="rangeStart" type="range" min="0" max="1" value="0"></label>
+          <label class="slider-label">终点<input id="rangeEnd" type="range" min="0" max="1" value="1"></label>
+          <div class="range-actions"><button id="selectAllBtn" class="ghost small">全选</button><button id="zoomSelectionBtn" class="ghost small">图表聚焦范围</button></div>
+        </section>
+
+        <section class="card panel operation-panel">
+          <span class="eyebrow">批量生成</span>
+          <label class="wide-label">处理方式
+            <select id="operationMode">
+              <option value="offset">整体升高 / 降低</option>
+              <option value="set">设为恒定温度</option>
+              <option value="linear">线性升温 / 降温</option>
+              <option value="clamp">限制上下界</option>
+              <option value="smooth">平滑曲线</option>
+              <option value="realistic_combustion">真实燃烧合规修复（推荐）</option>
+              <option value="sine">叠加平滑波动</option>
+              <option value="window_delta_clamp">限制单位时间温差</option>
+            </select>
+          </label>
+          <div id="operationFields" class="operation-fields"></div>
+          <button id="applyOperationBtn" class="primary wide">应用到选中范围</button>
+          <button id="restoreSelectionBtn" class="ghost wide">恢复选中范围原始值</button>
+        </section>
+
+        <section class="card panel diagnostic-panel">
+          <span class="eyebrow">格式诊断</span>
+          <dl id="diagnostics"></dl>
+          <label class="wide-label manual-map">Excel 首行对应物理记录
+            <span><input id="manualStartRecord" type="number"><button id="remapBtn" class="ghost small">重新映射</button></span>
+          </label>
+        </section>
+      </aside>
+
+      <div class="main-column">
+        <section class="card chart-card">
+          <div class="chart-toolbar">
+            <div><span class="eyebrow">可视化编辑</span><h2 id="chartTitle">通道01 温度曲线</h2></div>
+            <div class="chart-actions">
+              <button id="panPrevBtn" class="ghost small" title="向前移动时间窗口">‹</button>
+              <select id="timeWindowSelect" class="time-window" title="参考 DMR 的时间轴档位">
+                <option value="all">全部</option><option value="custom" hidden>自定义</option><option value="60">1小时</option><option value="240">4小时</option>
+                <option value="480">8小时</option><option value="720">12小时</option><option value="1440">24小时</option>
+              </select>
+              <button id="panNextBtn" class="ghost small" title="向后移动时间窗口">›</button>
+              <button id="zoomOutBtn" class="ghost small" title="缩小">−</button>
+              <button id="zoomInBtn" class="ghost small" title="放大">＋</button>
+              <button id="fitAllBtn" class="ghost small">复位</button>
+              <button id="drawModeBtn" class="draw-toggle active">✦ 拖动绘制</button>
+            </div>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="curveCanvas"></canvas>
+            <div id="chartTooltip" class="chart-tooltip hidden"></div>
+          </div>
+          <div class="chart-hint"><span id="zoomStatus">显示全部</span><span>滚轮：以指针为中心缩放 · Shift+滚轮：平移 · 双击：复位 · “平移查看”模式可拖动画布</span></div>
+        </section>
+
+        <section class="card table-card">
+          <div class="section-heading table-heading">
+            <div><span class="eyebrow">逐点精修</span><h2>温度数据表</h2></div>
+            <div class="pager"><button id="prevPage" class="ghost small">上一页</button><span id="pageText">1 / 1</span><button id="nextPage" class="ghost small">下一页</button></div>
+          </div>
+          <div class="table-scroll">
+            <table><thead><tr><th>#</th><th>时间</th><th>物理记录</th><th>原始 ℃</th><th>目标 ℃</th><th>变化</th></tr></thead><tbody id="dataBody"></tbody></table>
+          </div>
+        </section>
+
+        <section class="card export-card">
+          <div class="section-heading">
+            <div><span class="eyebrow">校验与交付</span><h2>生成客户文件</h2></div>
+            <span id="validationBadge" class="badge waiting">等待编辑</span>
+          </div>
+          <div class="requirements-section">
+            <div class="requirements-heading">
+              <div><b>客户验收要求</b><small>可按当前选中时间段添加多条升温或保温规则</small></div>
+              <div class="requirement-actions">
+                <button id="addHeatingRequirementBtn" class="ghost small">＋ 升温要求</button>
+                <button id="addHoldingRequirementBtn" class="ghost small">＋ 保温要求</button>
+                <button id="validateRequirementsBtn" class="secondary small">校验客户要求</button>
+              </div>
+            </div>
+            <div id="requirementList" class="requirement-list"><div class="empty-requirements">尚未添加要求。可先选中不合格时间段，再添加对应规则。</div></div>
+            <div class="requirement-gate-row">
+              <label><input id="requirementGate" type="checkbox" checked> 导出 PLR/客户图片前必须通过全部客户要求</label>
+              <span id="requirementSummary">等待填写和校验</span>
+            </div>
+          </div>
+          <div class="metadata-grid">
+            <label>图片标题<input id="imageTitle" value="温度记录曲线"></label>
+            <label>客户 / 项目<input id="customerName" placeholder="例如：XX 客户 · 3#炉"></label>
+            <label>说明<input id="imageNote" placeholder="例如：2023-11-06 升温测试"></label>
+          </div>
+          <div id="validationSummary" class="validation-summary">完成编辑后，点击“校验并生成 PLR”。</div>
+          <div class="export-buttons">
+            <button id="exportPlrBtn" class="primary">校验全部并生成 PLR</button>
+            <button id="exportPngBtn" class="secondary">导出曲线 PNG</button>
+            <button id="exportCsvBtn" class="secondary">导出修改清单 CSV</button>
+            <button id="exportProjectBtn" class="ghost">保存编辑项目 JSON</button>
+            <label class="button-label ghost">载入项目 JSON<input id="projectFile" type="file" accept=".json,application/json"></label>
+            <label class="button-label verify-label">载入 DMR 回读 Excel<input id="verificationFile" type="file" accept=".xls,.xlsx,.XLS,.XLSX"></label>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/vendor/xlsx.full.min.js"></script>
+  <script src="/core.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
