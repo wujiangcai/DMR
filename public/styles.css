@@ -127,6 +127,10 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .legend-dash { width:18px; border-top:2px dashed #98a6ac; }
 .draw-toggle { color:#fff; background:var(--orange); }
 .draw-toggle:not(.active) { color:#8a4b2b; border-color:#efb28e; background:#fff7f2; }
+.coordinated-draw-toggle { color:#35645f; border-color:#9bc4bf; background:#eef8f6; white-space:nowrap; }
+.coordinated-draw-toggle.active { color:#fff; border-color:var(--teal); background:var(--teal); box-shadow:0 4px 12px rgba(13,119,109,.2); }
+.draw-scope-status { padding:3px 7px; color:#68777e; border:1px solid #dbe4e6; border-radius:12px; background:#fff; font-size:9px; font-weight:700; white-space:nowrap; }
+.draw-scope-status.coordinated { color:#086d63; border-color:#9cc6c1; background:#e8f6f3; }
 .canvas-wrap { position:relative; height:500px; margin:0 12px; border:1px solid #e2e8ea; border-radius:11px; overflow:hidden; background:#fff; }
 #curveCanvas { display:block; width:100%; height:100%; cursor:crosshair; touch-action:none; }
 .chart-tooltip { position:absolute; z-index:3; pointer-events:none; min-width:240px; max-width:270px; max-height:360px; overflow:hidden; padding:9px 11px; color:#fff; background:rgba(21,34,42,.94); border-radius:8px; font-size:10px; box-shadow:0 6px 18px rgba(0,0,0,.18); }

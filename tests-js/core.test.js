@@ -266,6 +266,20 @@ test("多通道协同修复正确处理通道开头的无效温度", () => {
   assert.ok(maximumWindowFluctuation(result[2], 8, 99, 30) <= 5 + 1e-9);
 });
 
+test("多通道协同绘制对所有通道应用同一插值温差并保留通道差", () => {
+  const base = { 1: [10, 11, 12, 13, 14], 3: [20, 22, 24, 26, 28], 5: [null, 31, 32, 33, 34] };
+  let current = Object.fromEntries(Object.entries(base).map(([channel, values]) => [channel, values.slice()]));
+  current = core.applyCoordinatedStroke(base, current, 1, 2, 3, 4);
+  assert.deepEqual(current[1], [10, 13, 15, 17, 14]);
+  assert.deepEqual(current[3], [20, 24, 27, 30, 28]);
+  assert.deepEqual(current[5], [null, 33, 35, 37, 34]);
+  assert.equal(current[3][2] - current[1][2], base[3][2] - base[1][2]);
+  current = core.applyCoordinatedStroke(base, current, 4, -1, 3, -2);
+  assert.equal(current[1][3], 11);
+  assert.equal(current[1][4], 13);
+  assert.equal(current[3][3] - current[1][3], base[3][3] - base[1][3]);
+});
+
 test("仅修复违规段时保留远离违规窗口的合规区", () => {
   const source = Array(200).fill(100);
   for (let index = 90; index <= 110; index++) source[index] = 100 + (index - 90) * 0.5;
@@ -416,9 +430,11 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(indexHtml, /id="showAllChannelsBtn"/);
   assert.match(indexHtml, /id="chartChannelLegend"/);
   assert.match(indexHtml, /id="operationScope"/);
+  assert.match(indexHtml, /id="coordinatedDrawBtn"/);
   const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
   assert.match(appScript, /displayChannels/);
   assert.match(appScript, /normalizedDisplayChannels/);
   assert.match(appScript, /applyCoordinatedOperation/);
+  assert.match(appScript, /applyCoordinatedStroke/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });

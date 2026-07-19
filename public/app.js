@@ -6,7 +6,7 @@
     plrFile: null, excelFile: null, session: null,
     activeChannel: 1, selection: [0, 0], view: [0, 0], page: 0, pageSize: 50,
     displayChannels: [],
-    undo: [], redo: [], drawEnabled: true, drag: null, panDrag: null, hoverIndex: null,
+    undo: [], redo: [], drawEnabled: true, coordinatedDrawEnabled: false, drag: null, panDrag: null, hoverIndex: null,
     chartMeta: null, latestOutput: null, requirementResult: null,
   };
 
@@ -76,7 +76,7 @@
       state.activeChannel = state.session.usableChannels[0];
       state.displayChannels = [state.activeChannel];
       state.selection = [0, state.session.rows.length - 1]; state.view = [...state.selection]; state.page = 0;
-      state.undo = []; state.redo = []; state.latestOutput = null; state.requirementResult = null; state.hoverIndex = null;
+      state.undo = []; state.redo = []; state.latestOutput = null; state.requirementResult = null; state.hoverIndex = null; state.coordinatedDrawEnabled = false;
       initializeWorkspace();
       setMessage(`解析成功：${excel.rows.length} 个时间点，自动定位到物理记录 ${alignment.startRecordIndex}`, "success");
       $("workspace").classList.remove("hidden"); $("step1").classList.add("done"); $("step2").classList.add("active");
@@ -175,7 +175,7 @@
     const channels = normalizedDisplayChannels();
     $("chartTitle").textContent = channels.length === 1
       ? `${channelLabel(state.activeChannel)} 温度曲线`
-      : `${channels.length} 个通道叠加曲线 · 当前编辑 ${channelLabel(state.activeChannel)}`;
+      : `${channels.length} 通道叠加 · 编辑${channelLabel(state.activeChannel)}`;
     $("tableTitle").textContent = `${channelLabel(state.activeChannel)} 温度数据表`;
     renderOperationScopeHint();
   }
@@ -199,6 +199,38 @@
     legend.innerHTML = state.displayChannels.map(channel => `<button type="button" class="chart-legend-item ${channel === state.activeChannel ? "active" : ""}" data-edit-channel="${channel}" style="--channel-color:${channelColor(channel)}" title="设为编辑通道"><span class="channel-swatch"></span>${channelLabel(channel)}${channel === state.activeChannel ? " · 编辑中" : ""}</button>`).join("")
       + `<span class="chart-legend-original"><span class="legend-dash"></span>当前编辑通道原始值</span>`;
     legend.querySelectorAll("[data-edit-channel]").forEach(button => button.addEventListener("click", () => setActiveChannel(button.dataset.editChannel)));
+    renderCoordinatedDrawState();
+  }
+
+  function setDrawEnabled(enabled) {
+    state.drawEnabled = Boolean(enabled);
+    $("drawModeBtn").classList.toggle("active", state.drawEnabled);
+    $("drawModeBtn").textContent = state.drawEnabled ? "✦ 绘制" : "↔ 平移";
+    $("curveCanvas").style.cursor = state.drawEnabled ? "crosshair" : "grab";
+    renderCoordinatedDrawState();
+  }
+
+  function renderCoordinatedDrawState() {
+    const button = $("coordinatedDrawBtn"), status = $("drawScopeStatus");
+    if (!button || !status) return;
+    const channels = normalizedDisplayChannels(), available = channels.length > 1;
+    if (!available) state.coordinatedDrawEnabled = false;
+    button.disabled = !available;
+    button.classList.toggle("active", state.coordinatedDrawEnabled);
+    button.textContent = state.coordinatedDrawEnabled ? `协同绘制：${channels.length}通道` : "协同绘制：关";
+    status.classList.toggle("coordinated", state.coordinatedDrawEnabled);
+    if (state.coordinatedDrawEnabled) status.textContent = state.drawEnabled ? `${channels.length} 通道协同绘制` : `协同已开启 · 当前平移`;
+    else status.textContent = `单通道绘制：${channelLabel(state.activeChannel)}`;
+  }
+
+  function toggleCoordinatedDraw() {
+    const channels = normalizedDisplayChannels();
+    if (channels.length < 2) return showToast("请先勾选至少两个展示通道", 3200);
+    state.coordinatedDrawEnabled = !state.coordinatedDrawEnabled;
+    if (state.coordinatedDrawEnabled) setDrawEnabled(true); else renderCoordinatedDrawState();
+    showToast(state.coordinatedDrawEnabled
+      ? `已开启 ${channels.map(channelLabel).join("、")} 图表协同编辑`
+      : "已关闭多通道协同编辑");
   }
 
   function operationChannels() {
@@ -570,8 +602,21 @@
     }
     if (event.button !== 0) return;
     const series = state.session.channels[state.activeChannel]; if (series.original[p.index] == null) return;
-    $("curveCanvas").setPointerCapture(event.pointerId); state.drag = { before: captureEditState(), last: p };
-    series.targets[p.index] = p.value; drawChart(); event.preventDefault();
+    const before = captureEditState(), channels = normalizedDisplayChannels();
+    $("curveCanvas").setPointerCapture(event.pointerId);
+    if (state.coordinatedDrawEnabled && channels.length > 1) {
+      const baseTargets = Object.fromEntries(channels.map(channel => [channel, before.targets[channel].slice()]));
+      const baseActive = baseTargets[state.activeChannel][p.index]; if (!Number.isFinite(baseActive)) return;
+      const delta = p.value - baseActive;
+      const currentTargets = Object.fromEntries(channels.map(channel => [channel, state.session.channels[channel].targets]));
+      const output = core.applyCoordinatedStroke(baseTargets, currentTargets, p.index, delta, p.index, delta);
+      for (const channel of channels) state.session.channels[channel].targets = output[channel];
+      state.drag = { before, last: { ...p, delta }, coordinated: true, channels, baseTargets };
+    } else {
+      state.drag = { before, last: p, coordinated: false };
+      series.targets[p.index] = p.value;
+    }
+    drawChart(); event.preventDefault();
   }
 
   function continueDraw(event) {
@@ -584,6 +629,15 @@
     }
     const p = canvasPoint(event), series = state.session.channels[state.activeChannel];
     if (state.drag) {
+      if (state.drag.coordinated) {
+        const baseActive = state.drag.baseTargets[state.activeChannel][p.index];
+        if (!Number.isFinite(baseActive)) return;
+        const delta = p.value - baseActive, last = state.drag.last;
+        const currentTargets = Object.fromEntries(state.drag.channels.map(channel => [channel, state.session.channels[channel].targets]));
+        const output = core.applyCoordinatedStroke(state.drag.baseTargets, currentTargets, last.index, last.delta, p.index, delta);
+        for (const channel of state.drag.channels) state.session.channels[channel].targets = output[channel];
+        state.drag.last = { ...p, delta }; drawChart(); event.preventDefault(); return;
+      }
       const last = state.drag.last, from = Math.min(last.index, p.index), to = Math.max(last.index, p.index), span = p.index - last.index || 1;
       for (let i = from; i <= to; i++) if (series.original[i] != null) series.targets[i] = last.value + (p.value - last.value) * (i - last.index) / span;
       state.drag.last = p; drawChart(); event.preventDefault(); return;
@@ -598,7 +652,8 @@
       return;
     }
     if (!state.drag) return;
-    const before = state.drag.before; state.drag = null; pushUndo(before, "拖动绘制曲线"); renderAll();
+    const before = state.drag.before, coordinated = state.drag.coordinated, channels = state.drag.channels || [state.activeChannel]; state.drag = null;
+    pushUndo(before, coordinated ? `协同拖动绘制 ${channels.map(channelLabel).join("、")}` : "拖动绘制曲线"); renderAll();
     try { $("curveCanvas").releasePointerCapture(event.pointerId); } catch (_) {}
   }
 
@@ -613,7 +668,10 @@
         : ` · ${value}${changed ? " · 已修改" : ""}`;
       return `<span class="tooltip-channel" style="--channel-color:${channelColor(channel)}"><i></i><b>${channelLabel(channel)}</b>${detail}</span>`;
     }).join("");
-    tip.innerHTML = `<strong>${row.time}</strong>${lines}<small>物理记录：${row.physicalRecordIndex}</small>`;
+    const editHint = state.coordinatedDrawEnabled && normalizedDisplayChannels().length > 1
+      ? `<br>拖动将以相同温差联动 ${normalizedDisplayChannels().length} 个通道`
+      : `<br>拖动只修改 ${channelLabel(state.activeChannel)}`;
+    tip.innerHTML = `<strong>${row.time}</strong>${lines}<small>物理记录：${row.physicalRecordIndex}${editHint}</small>`;
     const wrap = $("curveCanvas").parentElement.getBoundingClientRect(); tip.classList.remove("hidden");
     tip.style.left = `${Math.max(8, Math.min(wrap.width - 270, p.x + 14))}px`; tip.style.top = `${Math.max(8, Math.min(wrap.height - tip.offsetHeight - 8, p.y - 36))}px`;
   }
@@ -719,7 +777,8 @@
   $("operationMode").addEventListener("change", renderOperationFields); $("operationScope").addEventListener("change", renderOperationScopeHint); $("applyOperationBtn").addEventListener("click", applyBatchOperation); $("restoreSelectionBtn").addEventListener("click", restoreSelection);
   $("undoBtn").addEventListener("click", undo); $("redoBtn").addEventListener("click", redo);
   $("prevPage").addEventListener("click", () => { state.page--; renderTable(); }); $("nextPage").addEventListener("click", () => { state.page++; renderTable(); });
-  $("drawModeBtn").addEventListener("click", () => { state.drawEnabled = !state.drawEnabled; $("drawModeBtn").classList.toggle("active", state.drawEnabled); $("drawModeBtn").textContent = state.drawEnabled ? "✦ 拖动绘制" : "↔ 平移查看"; $("curveCanvas").style.cursor = state.drawEnabled ? "crosshair" : "grab"; });
+  $("coordinatedDrawBtn").addEventListener("click", toggleCoordinatedDraw);
+  $("drawModeBtn").addEventListener("click", () => setDrawEnabled(!state.drawEnabled));
   $("curveCanvas").addEventListener("pointerdown", beginDraw); $("curveCanvas").addEventListener("pointermove", continueDraw); $("curveCanvas").addEventListener("pointerup", endDraw); $("curveCanvas").addEventListener("pointercancel", endDraw); $("curveCanvas").addEventListener("pointerleave", hideTooltip);
   $("curveCanvas").addEventListener("wheel", handleChartWheel, { passive: false });
   $("curveCanvas").addEventListener("dblclick", () => setViewRange(0, state.session.rows.length - 1, "all"));

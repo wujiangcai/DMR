@@ -139,7 +139,8 @@
               <button id="zoomOutBtn" class="ghost small" title="缩小">−</button>
               <button id="zoomInBtn" class="ghost small" title="放大">＋</button>
               <button id="fitAllBtn" class="ghost small">复位</button>
-              <button id="drawModeBtn" class="draw-toggle active">✦ 拖动绘制</button>
+              <button id="coordinatedDrawBtn" class="coordinated-draw-toggle" title="在图上拖动时，让全部已展示通道使用相同温差联动" disabled>协同绘制：关</button>
+              <button id="drawModeBtn" class="draw-toggle active">✦ 绘制</button>
             </div>
           </div>
           <div id="chartChannelLegend" class="chart-channel-legend"></div>
@@ -147,7 +148,7 @@
             <canvas id="curveCanvas"></canvas>
             <div id="chartTooltip" class="chart-tooltip hidden"></div>
           </div>
-          <div class="chart-hint"><span id="zoomStatus">显示全部</span><span>滚轮：以指针为中心缩放 · Shift+滚轮：平移 · 双击：复位 · “平移查看”模式可拖动画布</span></div>
+          <div class="chart-hint"><span id="zoomStatus">显示全部</span><span id="drawScopeStatus" class="draw-scope-status">单通道绘制</span><span>滚轮：缩放 · Shift+滚轮：平移 · 双击：复位</span></div>
         </section>
 
         <section class="card table-card">

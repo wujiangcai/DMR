@@ -592,6 +592,32 @@
     return output;
   }
 
+  function applyCoordinatedStroke(baseSeriesByChannel, currentSeriesByChannel, fromIndex, fromDelta, toIndex, toDelta) {
+    const entries = Object.entries(baseSeriesByChannel || {}).filter(([, values]) => Array.isArray(values));
+    assert(entries.length > 0, "协同绘制至少需要一个通道");
+    const length = entries[0][1].length;
+    assert(entries.every(([, values]) => values.length === length), "协同绘制的各通道点数必须一致");
+    const output = {};
+    for (const [channel, baseValues] of entries) {
+      const current = currentSeriesByChannel && Array.isArray(currentSeriesByChannel[channel]) ? currentSeriesByChannel[channel] : baseValues;
+      assert(current.length === length, `协同绘制通道 ${channel} 的当前点数不一致`);
+      output[channel] = current.slice();
+    }
+    const first = Math.max(0, Math.min(length - 1, Math.round(Number(fromIndex))));
+    const last = Math.max(0, Math.min(length - 1, Math.round(Number(toIndex))));
+    const firstDelta = Number(fromDelta), lastDelta = Number(toDelta);
+    assert(Number.isFinite(firstDelta) && Number.isFinite(lastDelta), "协同绘制温差必须是有效数字");
+    const lo = Math.min(first, last), hi = Math.max(first, last), denominator = last - first;
+    for (let index = lo; index <= hi; index++) {
+      const ratio = denominator === 0 ? 1 : (index - first) / denominator;
+      const delta = firstDelta + (lastDelta - firstDelta) * ratio;
+      for (const [channel, baseValues] of entries) {
+        if (Number.isFinite(baseValues[index])) output[channel][index] = baseValues[index] + delta;
+      }
+    }
+    return output;
+  }
+
   function applyOperation(values, start, end, operation = {}) {
     const result = values.slice();
     const lo = Math.max(0, Math.min(values.length - 1, Math.min(start, end)));
@@ -919,6 +945,7 @@
     restoreTargets,
     applyOperation,
     applyCoordinatedOperation,
+    applyCoordinatedStroke,
     validateCustomerRequirements,
     buildEditPlan,
     createModifiedPlr,
