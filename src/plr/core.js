@@ -22,8 +22,9 @@
     validChannels: null,
   });
   const INVALID_VALUES = new Set([-32640, -32768, null, undefined, ""]);
-  const INT16_MIN = -32768;
-  const INT16_MAX = 32767;
+  const UINT16_MIN = 0;
+  const UINT16_MAX = 65535;
+  const UINT16_MODULUS = 65536;
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -144,15 +145,19 @@
   }
 
   function readRaw(plr, recordIndex, fieldIndex) {
-    return new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).getInt16(rawOffset(plr, recordIndex, fieldIndex), true);
+    return new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).getUint16(rawOffset(plr, recordIndex, fieldIndex), true);
   }
 
   function writeRaw(plr, recordIndex, fieldIndex, value) {
     const n = Number(value);
-    assert(Number.isFinite(n) && n >= INT16_MIN && n <= INT16_MAX, `raw 值超出 int16 范围：${value}`);
+    assert(Number.isFinite(n) && n >= UINT16_MIN && n <= UINT16_MAX, `raw 字超出 uint16 范围：${value}`);
     const offset = rawOffset(plr, recordIndex, fieldIndex);
-    new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).setInt16(offset, Math.round(n), true);
+    new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).setUint16(offset, Math.round(n), true);
     return Math.round(n);
+  }
+
+  function normalizeRawWord(value) {
+    return ((Math.round(value) % UINT16_MODULUS) + UINT16_MODULUS) % UINT16_MODULUS;
   }
 
   function addSampleIndices(length, count) {
@@ -791,9 +796,14 @@
         const physicalRecordIndex = session.rows[rowIndex].physicalRecordIndex;
         const rawOld = readRaw(session.plr, physicalRecordIndex, channel);
         const deltaRaw = Math.round((target - original) * session.scale);
-        const rawNew = rawOld + deltaRaw;
-        assert(rawNew >= INT16_MIN && rawNew <= INT16_MAX, `通道 ${channel} ${session.rows[rowIndex].time} 修改后超出 int16 范围`);
-        edits.push({ rowIndex, time: session.rows[rowIndex].time, channel, physicalRecordIndex, fieldIndex: channel, originalTemp: original, targetTemp: target, deltaTemp: target - original, rawOld, rawNew, deltaRaw });
+        assert(Math.abs(deltaRaw) < UINT16_MODULUS,
+          `通道 ${channel} ${session.rows[rowIndex].time} 单次修改温差过大，超出16位原始字的唯一可表达范围`);
+        const rawUnwrapped = rawOld + deltaRaw, rawNew = normalizeRawWord(rawUnwrapped);
+        edits.push({
+          rowIndex, time: session.rows[rowIndex].time, channel, physicalRecordIndex, fieldIndex: channel,
+          originalTemp: original, targetTemp: target, deltaTemp: target - original,
+          rawOld, rawNew, deltaRaw, rawWrapped: rawNew !== rawUnwrapped,
+        });
       }
     }
     return edits.sort((a, b) => a.physicalRecordIndex - b.physicalRecordIndex || a.channel - b.channel);
@@ -833,9 +843,9 @@
   }
 
   function exportCsv(session, edits) {
-    const header = ["time", "channel", "physical_record_index", "original_temp", "target_temp", "delta_temp", "raw_old", "raw_new", "delta_raw"];
+    const header = ["time", "channel", "physical_record_index", "original_temp", "target_temp", "delta_temp", "raw_old", "raw_new", "delta_raw", "raw_wrapped"];
     const lines = [header.join(",")];
-    for (const e of edits) lines.push([e.time, e.channel, e.physicalRecordIndex, e.originalTemp, e.targetTemp, e.deltaTemp, e.rawOld, e.rawNew, e.deltaRaw].map(csvEscape).join(","));
+    for (const e of edits) lines.push([e.time, e.channel, e.physicalRecordIndex, e.originalTemp, e.targetTemp, e.deltaTemp, e.rawOld, e.rawNew, e.deltaRaw, e.rawWrapped ? "yes" : "no"].map(csvEscape).join(","));
     return "\ufeff" + lines.join("\r\n") + "\r\n";
   }
 

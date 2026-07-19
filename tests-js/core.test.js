@@ -389,6 +389,23 @@ test("真实 DAT0131 样本自动纠正旧脚本的一点偏移", () => {
   assert.equal(output.diff.unexpectedBytes, 0);
 });
 
+test("高温通道跨越int16有符号边界时仍可按uint16原始字写入", () => {
+  const root = path.join(__dirname, "..");
+  const plr = core.parsePlr(fs.readFileSync(path.join(root, "fixtures", "DAT0131.PLR")));
+  const excel = core.parseExcelBytes(fs.readFileSync(path.join(root, "fixtures", "curve.xls")));
+  const session = core.buildSession(plr, excel, core.alignExcelToPlr(excel, plr));
+  const rowIndex = session.rows.findIndex(row => row.time === "2023-11-09 15:30:00");
+  assert.equal(session.channels[2].original[rowIndex], 1284);
+  assert.equal(session.channels[2].raw[rowIndex], 61320);
+  session.channels[2].targets[rowIndex] = 100;
+  const output = core.createModifiedPlr(session), edit = output.edits[0];
+  assert.equal(edit.deltaRaw, -56832);
+  assert.equal(edit.rawNew, 4488);
+  assert.equal(edit.rawWrapped, false);
+  assert.equal(core.readRaw({ ...plr, data: output.buffer }, edit.physicalRecordIndex, 2), 4488);
+  assert.equal(output.diff.unexpectedBytes, 0);
+});
+
 test("DMR 3.20.0 真实回读 Excel 与编辑目标逐点一致", () => {
   const root = path.join(__dirname, "..");
   const plr = core.parsePlr(fs.readFileSync(path.join(root, "fixtures", "DAT0131.PLR")));
