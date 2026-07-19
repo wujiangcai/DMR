@@ -596,6 +596,7 @@
     const p = canvasPoint(event); if (p.x < state.chartMeta.left || p.x > state.chartMeta.right || p.y < state.chartMeta.top || p.y > state.chartMeta.bottom) return;
     const wantsPan = !state.drawEnabled || event.button === 1 || event.button === 2 || event.shiftKey;
     if (wantsPan) {
+      dismissChartTooltip(); drawChart();
       $("curveCanvas").setPointerCapture(event.pointerId);
       state.panDrag = { startX: event.clientX, view: [...state.view] };
       $("curveCanvas").style.cursor = "grabbing"; event.preventDefault(); return;
@@ -603,6 +604,7 @@
     if (event.button !== 0) return;
     const series = state.session.channels[state.activeChannel]; if (series.original[p.index] == null) return;
     const before = captureEditState(), channels = normalizedDisplayChannels();
+    dismissChartTooltip();
     $("curveCanvas").setPointerCapture(event.pointerId);
     if (state.coordinatedDrawEnabled && channels.length > 1) {
       const baseTargets = Object.fromEntries(channels.map(channel => [channel, before.targets[channel].slice()]));
@@ -672,11 +674,25 @@
       ? `<br>拖动将以相同温差联动 ${normalizedDisplayChannels().length} 个通道`
       : `<br>拖动只修改 ${channelLabel(state.activeChannel)}`;
     tip.innerHTML = `<strong>${row.time}</strong>${lines}<small>物理记录：${row.physicalRecordIndex}${editHint}</small>`;
-    const wrap = $("curveCanvas").parentElement.getBoundingClientRect(); tip.classList.remove("hidden");
-    tip.style.left = `${Math.max(8, Math.min(wrap.width - 270, p.x + 14))}px`; tip.style.top = `${Math.max(8, Math.min(wrap.height - tip.offsetHeight - 8, p.y - 36))}px`;
+    tip.classList.remove("hidden"); positionChartTooltip(tip, p);
   }
 
-  function hideTooltip() { if (!state.drag && !state.panDrag) { state.hoverIndex = null; $("chartTooltip").classList.add("hidden"); drawChart(); } }
+  function positionChartTooltip(tip, p) {
+    const wrap = $("curveCanvas").parentElement.getBoundingClientRect(), margin = 10;
+    const width = Math.min(tip.offsetWidth, Math.max(0, wrap.width - margin * 2));
+    const height = Math.min(tip.offsetHeight, Math.max(0, wrap.height - margin * 2));
+    const left = p.x < wrap.width / 2 ? wrap.width - width - margin : margin;
+    const top = p.y < wrap.height / 2 ? wrap.height - height - margin : margin;
+    tip.style.left = `${Math.max(margin, left)}px`;
+    tip.style.top = `${Math.max(margin, top)}px`;
+    tip.dataset.placement = `${p.y < wrap.height / 2 ? "bottom" : "top"}-${p.x < wrap.width / 2 ? "right" : "left"}`;
+  }
+
+  function dismissChartTooltip() {
+    state.hoverIndex = null; $("chartTooltip").classList.add("hidden");
+  }
+
+  function hideTooltip() { if (!state.drag && !state.panDrag) { dismissChartTooltip(); drawChart(); } }
 
   function remapSession() {
     const start = Number($("manualStartRecord").value), total = state.session.plr.layout.totalRecords;
