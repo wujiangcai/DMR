@@ -125,7 +125,14 @@
     const data = new Uint8Array(bytes); // 与原始 File 分离，便于撤销和多次导出
     const layout = inferLayout(data, options);
     const signature = new TextDecoder("ascii").decode(data.slice(0, 16)).replace(/\0.*$/, "");
-    const validChannels = layout.validChannels ? [...layout.validChannels] : Array.from({ length: layout.recordSize / 2 }, (_, i) => i).filter(i => i > 0 && i <= 9);
+    const maximumFieldIndex = layout.recordSize / 2 - 1;
+    const requestedChannels = layout.validChannels
+      ? [...layout.validChannels]
+      : Array.from({ length: Math.min(9, maximumFieldIndex) }, (_, index) => index + 1);
+    const validChannels = [...new Set(requestedChannels.map(Number))].sort((a, b) => a - b);
+    assert(validChannels.length > 0, "至少需要一个可编辑温度通道");
+    assert(validChannels.every(channel => Number.isInteger(channel) && channel >= 1 && channel <= maximumFieldIndex),
+      `温度通道超出记录结构：${layout.recordSize} 字节记录最多容纳通道 ${maximumFieldIndex}`);
     return { data, layout, signature, validChannels };
   }
 

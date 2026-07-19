@@ -10,8 +10,16 @@
     chartMeta: null, latestOutput: null, requirementResult: null,
   };
 
-  const CHANNEL_COLORS = ["#e96d2f", "#0d8f83", "#3f78b5", "#8b5fbf", "#d39a19", "#d24f73", "#4d9a57", "#7b6b55", "#536f8d"];
-  const channelColor = channel => CHANNEL_COLORS[(Number(channel) - 1) % CHANNEL_COLORS.length];
+  const CHANNEL_COLORS = [
+    "#e96d2f", "#0d8f83", "#3f78b5", "#8b5fbf", "#d39a19", "#d24f73", "#4d9a57", "#7b6b55",
+    "#536f8d", "#b05a9d", "#1685a9", "#9b6d18", "#6b63c7", "#c4473a", "#2f8f52", "#ad6a3f",
+    "#347c8c", "#7d4f9f", "#718b28", "#c05f87", "#4266a9", "#a47729", "#32817a", "#8a6254",
+  ];
+  const channelColor = channel => {
+    const index = Math.max(0, Number(channel) - 1);
+    if (index < CHANNEL_COLORS.length) return CHANNEL_COLORS[index];
+    return `hsl(${Math.round((index * 137.508 + 18) % 360)} 58% 43%)`;
+  };
   const channelLabel = channel => `通道${String(channel).padStart(2, "0")}`;
 
   const operationDefinitions = {
@@ -64,10 +72,13 @@
     try {
       const [plrBuffer, excelBuffer] = await Promise.all([state.plrFile.arrayBuffer(), state.excelFile.arrayBuffer()]);
       const dataOffsetText = $("dataOffset").value.trim();
+      const channelCount = Number($("channelCount").value);
+      if (!Number.isInteger(channelCount) || channelCount < 1) throw new Error("温度通道数必须是正整数");
       const options = {
         dataOffset: dataOffsetText === "" ? null : Number(dataOffsetText),
         recordSize: Number($("recordSize").value), totalRecords: Number($("totalRecords").value),
         rawPerCelsius: Number($("rawScale").value),
+        validChannels: Array.from({ length: channelCount }, (_, index) => index + 1),
       };
       const excel = core.parseExcelBytes(excelBuffer);
       const plr = core.parsePlr(plrBuffer, options);
@@ -78,7 +89,7 @@
       state.selection = [0, state.session.rows.length - 1]; state.view = [...state.selection]; state.page = 0;
       state.undo = []; state.redo = []; state.latestOutput = null; state.requirementResult = null; state.hoverIndex = null; state.coordinatedDrawEnabled = false;
       initializeWorkspace();
-      setMessage(`解析成功：${excel.rows.length} 个时间点，自动定位到物理记录 ${alignment.startRecordIndex}`, "success");
+      setMessage(`解析成功：${excel.rows.length} 个时间点、${state.session.usableChannels.length} 个温度通道，自动定位到物理记录 ${alignment.startRecordIndex}`, "success");
       $("workspace").classList.remove("hidden"); $("step1").classList.add("done"); $("step2").classList.add("active");
       setTimeout(() => { resizeAndDraw(); $("workspace").scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
     } catch (error) {
@@ -148,7 +159,7 @@
     const confidence = { high: "高", medium: "中", low: "低" }[a.confidence] || a.confidence;
     $("diagnostics").innerHTML = [
       ["设备签名", s.plr.signature || "未知"], ["文件字节", s.plr.data.length], ["数据区偏移", s.plr.layout.dataOffset],
-      ["记录结构", `${s.plr.layout.totalRecords} × ${s.plr.layout.recordSize} B`], ["自动物理起点", a.startRecordIndex],
+      ["记录结构", `${s.plr.layout.totalRecords} × ${s.plr.layout.recordSize} B`], ["温度通道", `${s.usableChannels.length} 个`], ["自动物理起点", a.startRecordIndex],
       ["对齐平均误差", `${a.meanAbsError.toFixed(3)} ℃`], ["对齐置信度", confidence], ["raw / ℃", s.scale],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
   }
@@ -512,26 +523,43 @@
     const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return { ctx, width, height, dpr };
   }
 
+  function buildExportLegendLayout(channels, canvasWidth, left, right) {
+    const items = channels.map(channel => ({ type: "channel", channel, width: channel === state.activeChannel ? 150 : 108 }));
+    items.push({ type: "original", width: 190 });
+    let x = left, baseline = 112;
+    for (const item of items) {
+      if (x > left && x + item.width > canvasWidth - right) { x = left; baseline += 32; }
+      item.x = x; item.y = baseline; x += item.width;
+    }
+    return { items, plotTop: baseline + 36, extraHeight: baseline - 112 };
+  }
+
   function drawChart(canvas = $("curveCanvas"), exportMode = false) {
     if (!state.session) return;
-    const dimensions = setupCanvas(canvas, exportMode ? 1800 : null, exportMode ? 1000 : null);
-    const { ctx, width, height } = dimensions, activeSeries = state.session.channels[state.activeChannel], channels = normalizedDisplayChannels(), [start, end] = state.view;
+    const channels = normalizedDisplayChannels();
+    const exportLegend = exportMode ? buildExportLegendLayout(channels, 1800, 92, 48) : null;
+    const dimensions = setupCanvas(canvas, exportMode ? 1800 : null, exportMode ? 1000 + exportLegend.extraHeight : null);
+    const { ctx, width, height } = dimensions, activeSeries = state.session.channels[state.activeChannel], [start, end] = state.view;
     ctx.clearRect(0, 0, width, height); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, width, height);
-    const top = exportMode ? 148 : 25, bottom = exportMode ? 82 : 48, left = exportMode ? 92 : 62, right = exportMode ? 48 : 24;
+    const top = exportMode ? exportLegend.plotTop : 25, bottom = exportMode ? 82 : 48, left = exportMode ? 92 : 62, right = exportMode ? 48 : 24;
     if (exportMode) {
       ctx.fillStyle = "#153038"; ctx.font = "700 32px 'Microsoft YaHei', sans-serif"; ctx.fillText($("imageTitle").value || "温度记录曲线", left, 46);
       ctx.fillStyle = "#537078"; ctx.font = "18px 'Microsoft YaHei', sans-serif"; ctx.fillText([$("customerName").value, $("imageNote").value].filter(Boolean).join("  ·  "), left, 80);
-      const channelText = channels.length === state.session.usableChannels.length ? `全部 ${channels.length} 通道` : channels.map(channelLabel).join(" / ");
+      const channelText = channels.length === state.session.usableChannels.length
+        ? `全部 ${channels.length} 通道`
+        : channels.length <= 8 ? channels.map(channelLabel).join(" / ") : `已选 ${channels.length} 通道 · ${channels.slice(0, 3).map(channelLabel).join(" / ")} …`;
       ctx.textAlign = "right"; ctx.fillStyle = "#0d776d"; ctx.font = "700 18px 'Segoe UI', sans-serif"; ctx.fillText(`${channelText}  /  DMR Curve Studio`, width - right, 48); ctx.textAlign = "left";
-      let legendX = left;
       ctx.font = "600 15px 'Microsoft YaHei', sans-serif";
-      for (const channel of channels) {
-        ctx.strokeStyle = channelColor(channel); ctx.lineWidth = channel === state.activeChannel ? 4 : 2.5; ctx.beginPath(); ctx.moveTo(legendX, 112); ctx.lineTo(legendX + 28, 112); ctx.stroke();
-        ctx.fillStyle = "#40575f"; ctx.fillText(`${channelLabel(channel)}${channel === state.activeChannel ? "（编辑）" : ""}`, legendX + 35, 117);
-        legendX += channel === state.activeChannel ? 150 : 105;
+      for (const item of exportLegend.items) {
+        if (item.type === "channel") {
+          const channel = item.channel;
+          ctx.strokeStyle = channelColor(channel); ctx.lineWidth = channel === state.activeChannel ? 4 : 2.5; ctx.beginPath(); ctx.moveTo(item.x, item.y); ctx.lineTo(item.x + 28, item.y); ctx.stroke();
+          ctx.fillStyle = "#40575f"; ctx.fillText(`${channelLabel(channel)}${channel === state.activeChannel ? "（编辑）" : ""}`, item.x + 35, item.y + 5);
+        } else {
+          ctx.save(); ctx.setLineDash([7, 5]); ctx.strokeStyle = "#98a6ac"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(item.x, item.y); ctx.lineTo(item.x + 28, item.y); ctx.stroke(); ctx.restore();
+          ctx.fillStyle = "#687a82"; ctx.fillText("当前通道原始值", item.x + 35, item.y + 5);
+        }
       }
-      ctx.save(); ctx.setLineDash([7, 5]); ctx.strokeStyle = "#98a6ac"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(legendX, 112); ctx.lineTo(legendX + 28, 112); ctx.stroke(); ctx.restore();
-      ctx.fillStyle = "#687a82"; ctx.fillText("当前通道原始值", legendX + 35, 117);
     }
     const values = [];
     for (const channel of channels) {
@@ -661,7 +689,8 @@
 
   function showChartTooltip(event, p) {
     const row = state.session.rows[p.index], tip = $("chartTooltip");
-    const lines = normalizedDisplayChannels().map(channel => {
+    const channels = normalizedDisplayChannels();
+    const lines = channels.map(channel => {
       const series = state.session.channels[channel], original = series.original[p.index], target = series.targets[p.index];
       const changed = Number.isFinite(original) && Number.isFinite(target) && Math.abs(original - target) > 1e-9;
       const value = target == null ? "—" : `${target.toFixed(2)} ℃`;
@@ -670,11 +699,21 @@
         : ` · ${value}${changed ? " · 已修改" : ""}`;
       return `<span class="tooltip-channel" style="--channel-color:${channelColor(channel)}"><i></i><b>${channelLabel(channel)}</b>${detail}</span>`;
     }).join("");
-    const editHint = state.coordinatedDrawEnabled && normalizedDisplayChannels().length > 1
-      ? `<br>拖动将以相同温差联动 ${normalizedDisplayChannels().length} 个通道`
+    const editHint = state.coordinatedDrawEnabled && channels.length > 1
+      ? `<br>拖动将以相同温差联动 ${channels.length} 个通道`
       : `<br>拖动只修改 ${channelLabel(state.activeChannel)}`;
-    tip.innerHTML = `<strong>${row.time}</strong>${lines}<small>物理记录：${row.physicalRecordIndex}${editHint}</small>`;
+    tip.innerHTML = `<strong>${row.time}</strong><div class="tooltip-channel-list">${lines}</div><small>物理记录：${row.physicalRecordIndex}${editHint}</small>`;
+    configureChartTooltip(tip, channels.length);
     tip.classList.remove("hidden"); positionChartTooltip(tip, p);
+  }
+
+  function configureChartTooltip(tip, channelCount) {
+    const wrap = $("curveCanvas").parentElement.getBoundingClientRect();
+    const maximumColumns = Math.max(1, Math.min(4, Math.floor((wrap.width - 20) / 215)));
+    const columns = Math.max(1, Math.min(maximumColumns, Math.ceil(channelCount / 8)));
+    tip.classList.toggle("dense", channelCount > 32);
+    tip.style.setProperty("--tooltip-columns", columns);
+    tip.style.width = `${Math.min(wrap.width - 20, columns === 1 ? 270 : columns * 250)}px`;
   }
 
   function positionChartTooltip(tip, p) {

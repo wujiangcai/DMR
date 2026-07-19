@@ -110,6 +110,34 @@ test("解析 DMR Excel，识别通道和无效温度", () => {
   assert.equal(parsed.rows[0].channels[2], null);
 });
 
+test("扩展记录结构支持16个及更多温度通道且不发生字段越界", () => {
+  const channelCount = 24, dataOffset = 4, recordSize = (channelCount + 1) * 2, totalRecords = 3;
+  const bytes = new Uint8Array(dataOffset + recordSize * totalRecords); bytes.set(Buffer.from("MCA\0"));
+  const view = new DataView(bytes.buffer), base = new Date(2024, 0, 1, 8, 0, 0);
+  const rows = [];
+  for (let rowIndex = 0; rowIndex < totalRecords; rowIndex++) {
+    const channels = {};
+    for (let channel = 1; channel <= channelCount; channel++) {
+      const temperature = 20 + channel + rowIndex;
+      view.setInt16(dataOffset + rowIndex * recordSize + channel * 2, temperature * 48, true);
+      channels[channel] = temperature;
+    }
+    const date = new Date(base.getTime() + rowIndex * 120000);
+    rows.push({ index: rowIndex, date, time: core.formatDate(date), channels });
+  }
+  const validChannels = Array.from({ length: channelCount }, (_, index) => index + 1);
+  const plr = core.parsePlr(bytes, { dataOffset, recordSize, totalRecords, rawPerCelsius: 48, validChannels });
+  const excel = { rows, channels: validChannels, start: rows[0].date, end: rows.at(-1).date, intervalMinutes: 2 };
+  const session = core.buildSession(plr, excel, { startRecordIndex: 0 });
+  assert.deepEqual(session.usableChannels, validChannels);
+  session.channels[channelCount].targets[1] += 2;
+  const output = core.createModifiedPlr(session);
+  assert.equal(output.edits.length, 1);
+  assert.equal(output.edits[0].channel, channelCount);
+  assert.equal(output.diff.unexpectedBytes, 0);
+  assert.throws(() => core.parsePlr(bytes, { dataOffset, recordSize: 24, totalRecords, validChannels }), /最多容纳通道 11/);
+});
+
 test("自动对齐可识别跨环形缓冲区的物理起点", () => {
   const plr = syntheticPlr(), excel = syntheticExcel();
   const alignment = core.alignExcelToPlr(excel, plr, { sampleCount: 10 });
@@ -431,10 +459,13 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(indexHtml, /id="chartChannelLegend"/);
   assert.match(indexHtml, /id="operationScope"/);
   assert.match(indexHtml, /id="coordinatedDrawBtn"/);
+  assert.match(indexHtml, /id="channelCount"/);
   const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
   assert.match(appScript, /displayChannels/);
   assert.match(appScript, /normalizedDisplayChannels/);
   assert.match(appScript, /applyCoordinatedOperation/);
   assert.match(appScript, /applyCoordinatedStroke/);
+  assert.match(appScript, /buildExportLegendLayout/);
+  assert.match(appScript, /configureChartTooltip/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });
