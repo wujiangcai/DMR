@@ -21,6 +21,9 @@
     return `hsl(${Math.round((index * 137.508 + 18) % 360)} 58% 43%)`;
   };
   const channelLabel = channel => `通道${String(channel).padStart(2, "0")}`;
+  const REALISTIC_PRESETS = core.REALISTIC_COMBUSTION_PRESETS || {};
+  const REALISTIC_PRESET_OPTIONS = Object.entries(REALISTIC_PRESETS)
+    .map(([id, preset]) => `<option value="${id}">${preset.label}</option>`).join("");
 
   const operationDefinitions = {
     offset: `<label class="full">温度变化（℃）<input data-op="value" type="number" value="5" step="0.1"></label>`,
@@ -28,7 +31,30 @@
     linear: `<label>起点温度（℃）<input data-op="startValue" type="number" value="90" step="0.1"></label><label>终点温度（℃）<input data-op="endValue" type="number" value="130" step="0.1"></label>`,
     clamp: `<label>最低温度（℃）<input data-op="minimum" type="number" value="95" step="0.1"></label><label>最高温度（℃）<input data-op="maximum" type="number" value="105" step="0.1"></label>`,
     smooth: `<label class="full">平滑窗口（采样点）<input data-op="window" type="number" value="7" min="1" step="2"></label>`,
-    realistic_combustion: `<label>工艺阶段<select data-op="phase"><option value="heating">升温阶段</option><option value="holding">保温阶段</option></select></label><label>校验窗口（分钟）<input data-op="windowMinutes" type="number" value="60" min="1"></label><label>每小时最大升温（℃/h）<input data-op="maxRisePerHour" type="number" value="5" min="0" step="0.1"></label><label>窗口最大温差（℃）<input data-op="maxFluctuation" type="number" value="5" min="0" step="0.1"></label><label>自然波动强度（℃）<input data-op="amplitude" type="number" value="1.5" min="0" step="0.1"></label><label>保留原曲线特征（0～1）<input data-op="preserveRatio" type="number" value="0.45" min="0" max="1" step="0.05"></label><label>共同波动比例（0～1）<input data-op="sharedRatio" type="number" value="0.85" min="0" max="1" step="0.05"></label><label>趋势同步比例（0～1）<input data-op="trendSyncRatio" type="number" value="0.8" min="0" max="1" step="0.05"></label><label>通道响应差异（0～0.5）<input data-op="channelVariation" type="number" value="0.08" min="0" max="0.5" step="0.01"></label><label>共同温度调整（℃）<input data-op="commonOffset" type="number" value="0" step="0.1"></label><label>波动相关时间（分钟）<input data-op="correlationMinutes" type="number" value="18" min="1"></label><label>燃料扰动次数（次/小时）<input data-op="eventsPerHour" type="number" value="0.7" min="0" step="0.1"></label><label>随机种子<input data-op="seed" value="20260719"></label><label>边界过渡（分钟）<input data-op="transitionMinutes" type="number" value="10" min="0"></label><label class="full check-field"><input data-op="onlyViolations" type="checkbox" checked> 只修复任一已选通道检测到的违规窗口及过渡区</label><label class="full check-field"><input data-op="createRequirement" type="checkbox" checked> 为每个协同修改通道加入客户验收要求</label><div class="full operation-note">多通道协同时生成一条共同燃烧驱动，通道保持原有温差和少量独立响应；共同波动高度相关但不会完全重合，最后逐通道投影到客户限制范围。</div>`,
+    realistic_combustion: `
+      <label class="full">真实波动预设<select data-op="curvePreset">${REALISTIC_PRESET_OPTIONS}<option value="custom">自定义参数</option></select></label>
+      <div class="full operation-note" data-preset-hint></div>
+      <label>工艺阶段<select data-op="phase"><option value="heating">升温阶段</option><option value="holding">保温阶段</option><option value="cooling">降温阶段</option></select></label>
+      <label>校验窗口（分钟）<input data-op="windowMinutes" type="number" value="60" min="1"></label>
+      <label data-phase-limit="heating">每小时最大升温（℃/h）<input data-op="maxRisePerHour" type="number" value="5" min="0" step="0.1"></label>
+      <label data-phase-limit="cooling" class="hidden">每小时最大降温（℃/h）<input data-op="maxFallPerHour" type="number" value="5" min="0" step="0.1"></label>
+      <label data-phase-limit="holding" class="hidden">窗口最大温差（℃）<input data-op="maxFluctuation" type="number" value="5" min="0" step="0.1"></label>
+      <label>自然波动强度（℃）<input data-op="amplitude" type="number" value="2.2" min="0" step="0.1"></label>
+      <label>保留原曲线特征（0～1）<input data-op="preserveRatio" type="number" value="0.62" min="0" max="1" step="0.01"></label>
+      <label>共同波动比例（0～1）<input data-op="sharedRatio" type="number" value="0.78" min="0" max="1" step="0.01"></label>
+      <label>趋势同步比例（0～1）<input data-op="trendSyncRatio" type="number" value="0.82" min="0" max="1" step="0.01"></label>
+      <label>通道响应差异（0～0.5）<input data-op="channelVariation" type="number" value="0.12" min="0" max="0.5" step="0.01"></label>
+      <label>共同温度调整（℃）<input data-op="commonOffset" type="number" value="0" step="0.1"></label>
+      <label>波动相关时间（分钟）<input data-op="correlationMinutes" type="number" value="14" min="1"></label>
+      <label>趋势提取时间（分钟）<input data-op="trendMinutes" type="number" value="75" min="1"></label>
+      <label>扰动次数（次/小时）<input data-op="eventsPerHour" type="number" value="1.1" min="0" step="0.05"></label>
+      <label>周期成分比例（0～0.6）<input data-op="cycleRatio" type="number" value="0.10" min="0" max="0.6" step="0.01"></label>
+      <label>脉冲扰动强度（0～3）<input data-op="pulseStrength" type="number" value="1" min="0" max="3" step="0.05"></label>
+      <label>随机种子<input data-op="seed" value="20260719"></label>
+      <label>边界过渡（分钟）<input data-op="transitionMinutes" type="number" value="12" min="0"></label>
+      <label class="full check-field"><input data-op="onlyViolations" type="checkbox" checked> 只修复任一已选通道检测到的违规窗口及过渡区</label>
+      <label class="full check-field"><input data-op="createRequirement" type="checkbox" checked> 为每个协同修改通道加入客户验收要求</label>
+      <div class="full operation-note">共同驱动由多时间尺度随机惯性、变周期弱成分、非对称脉冲和微扰组成；周期占比已显著降低，避免生成规则正弦曲线。</div>`,
     sine: `<label>波动幅度（℃）<input data-op="amplitude" type="number" value="3" step="0.1"></label><label>一个周期点数<input data-op="period" type="number" value="20" min="1"></label>`,
     window_delta_clamp: `<label>时间窗口（分钟）<input data-op="windowMinutes" type="number" value="10" min="1"></label><label>最大温差（℃）<input data-op="maxDelta" type="number" value="5" min="0" step="0.1"></label>`,
   };
@@ -269,7 +295,46 @@
     }
   }
 
-  function renderOperationFields() { $("operationFields").innerHTML = operationDefinitions[$("operationMode").value]; renderOperationScopeHint(); }
+  function updateRealisticPhaseFields() {
+    const root = $("operationFields"), phase = root.querySelector('[data-op="phase"]')?.value;
+    root.querySelectorAll("[data-phase-limit]").forEach(label => label.classList.toggle("hidden", label.dataset.phaseLimit !== phase));
+  }
+
+  function applyRealisticPreset(presetId) {
+    const root = $("operationFields"), preset = REALISTIC_PRESETS[presetId], hint = root.querySelector("[data-preset-hint]");
+    if (!preset) { if (hint) hint.textContent = "自定义参数：修改后可继续调整各比例；客户限值不会被预设覆盖。"; updateRealisticPhaseFields(); return; }
+    for (const [key, value] of Object.entries(preset.parameters || {})) {
+      const input = root.querySelector(`[data-op="${key}"]`); if (input) input.value = value;
+    }
+    if (hint) hint.textContent = preset.description;
+    updateRealisticPhaseFields();
+  }
+
+  function bindRealisticPresetFields() {
+    const root = $("operationFields"), presetSelect = root.querySelector('[data-op="curvePreset"]'), phaseSelect = root.querySelector('[data-op="phase"]');
+    if (!presetSelect || !phaseSelect) return;
+    const phasePresets = { heating: "sample_heating", holding: "sample_holding", cooling: "sample_cooling" };
+    presetSelect.addEventListener("change", () => applyRealisticPreset(presetSelect.value));
+    phaseSelect.addEventListener("change", () => {
+      presetSelect.value = phasePresets[phaseSelect.value] || "custom";
+      applyRealisticPreset(presetSelect.value);
+    });
+    root.querySelectorAll("[data-op]").forEach(input => {
+      if (input === presetSelect || input === phaseSelect) return;
+      input.addEventListener("change", () => {
+        presetSelect.value = "custom";
+        const hint = root.querySelector("[data-preset-hint]");
+        if (hint) hint.textContent = "已基于预设转为自定义参数；客户升温、保温或降温限值保持独立。";
+      });
+    });
+    applyRealisticPreset(presetSelect.value);
+  }
+
+  function renderOperationFields() {
+    $("operationFields").innerHTML = operationDefinitions[$("operationMode").value];
+    if ($("operationMode").value === "realistic_combustion") bindRealisticPresetFields();
+    renderOperationScopeHint();
+  }
 
   function readOperation() {
     const operation = { mode: $("operationMode").value, intervalMinutes: state.session.excel.intervalMinutes || 2 };
@@ -320,7 +385,7 @@
       }
       if (operation.mode === "realistic_combustion" && operation.createRequirement) {
         for (const channel of channels) addRequirement(operation.phase, {
-            maxRisePerHour: Number(operation.maxRisePerHour), maxFluctuation: Number(operation.maxFluctuation),
+            maxRisePerHour: Number(operation.maxRisePerHour), maxFallPerHour: Number(operation.maxFallPerHour), maxFluctuation: Number(operation.maxFluctuation),
             windowMinutes: Number(operation.windowMinutes), startIndex: a, endIndex: b, channel,
           }, false);
       }
@@ -357,10 +422,12 @@
 
   function addRequirement(phase, overrides = {}, shouldRender = true) {
     const [selectionStart, selectionEnd] = state.selection;
+    phase = phase === "holding" || phase === "cooling" ? phase : "heating";
+    const phaseName = phase === "holding" ? "保温阶段窗口波动" : phase === "cooling" ? "降温阶段每小时速度" : "升温阶段每小时速度";
     const requirement = {
-      id: requirementId(), name: phase === "holding" ? "保温阶段每小时波动" : "升温阶段每小时速度",
+      id: requirementId(), name: phaseName,
       channel: state.activeChannel, phase, startIndex: selectionStart, endIndex: selectionEnd,
-      windowMinutes: 60, maxRisePerHour: 5, maxFluctuation: 5, ...overrides,
+      windowMinutes: 60, maxRisePerHour: 5, maxFallPerHour: 5, maxFluctuation: 5, ...overrides,
     };
     const list = state.session.customerRequirements || (state.session.customerRequirements = []);
     const same = list.find(item => item.channel === requirement.channel && item.phase === requirement.phase && item.startIndex === requirement.startIndex && item.endIndex === requirement.endIndex);
@@ -389,13 +456,13 @@
       rule.endIndex = Math.max(rule.startIndex, Math.min(state.session.rows.length - 1, Number(rule.endIndex == null ? state.session.rows.length - 1 : rule.endIndex)));
       const result = state.requirementResult && state.requirementResult.rules[index];
       const card = document.createElement("div"); card.className = `requirement-card ${rule.phase}`;
-      const limitLabel = rule.phase === "holding" ? "最大温差 ℃" : "最大升温 ℃/h";
-      const limitValue = rule.phase === "holding" ? rule.maxFluctuation : rule.maxRisePerHour;
-      card.innerHTML = `<label>要求名称<input data-key="name" value="${escapeHtml(rule.name || "")}"></label><label>通道<select data-key="channel">${state.session.usableChannels.map(ch => `<option value="${ch}" ${Number(rule.channel) === ch ? "selected" : ""}>通道${String(ch).padStart(2, "0")}</option>`).join("")}</select></label><label>阶段<select data-key="phase"><option value="heating" ${rule.phase !== "holding" ? "selected" : ""}>升温</option><option value="holding" ${rule.phase === "holding" ? "selected" : ""}>保温</option></select></label><label>开始<input data-key="start" type="datetime-local" value="${toDateTimeLocal(state.session.rows[rule.startIndex].date)}"></label><label>结束<input data-key="end" type="datetime-local" value="${toDateTimeLocal(state.session.rows[rule.endIndex].date)}"></label><label>窗口 min<input data-key="windowMinutes" type="number" min="1" value="${Number(rule.windowMinutes || 60)}"></label><label class="requirement-limit">${limitLabel}<input data-key="limit" type="number" min="0" step="0.1" value="${Number(limitValue == null ? 5 : limitValue)}"></label><button class="ghost remove-rule" title="删除要求">删除</button><div class="use-selection"><button class="ghost small">使用当前选中时间段</button><span class="rule-result ${result ? (result.passed ? "ok" : "bad") : ""}">${result ? (result.passed ? `通过 · 最大 ${result.maximumObserved.toFixed(2)}` : `${result.violationCount} 个违规 · 最大 ${result.maximumObserved.toFixed(2)}`) : "尚未校验"}</span></div>`;
+      const limitLabel = rule.phase === "holding" ? "最大温差 ℃" : rule.phase === "cooling" ? "最大降温 ℃/h" : "最大升温 ℃/h";
+      const limitValue = rule.phase === "holding" ? rule.maxFluctuation : rule.phase === "cooling" ? rule.maxFallPerHour : rule.maxRisePerHour;
+      card.innerHTML = `<label>要求名称<input data-key="name" value="${escapeHtml(rule.name || "")}"></label><label>通道<select data-key="channel">${state.session.usableChannels.map(ch => `<option value="${ch}" ${Number(rule.channel) === ch ? "selected" : ""}>通道${String(ch).padStart(2, "0")}</option>`).join("")}</select></label><label>阶段<select data-key="phase"><option value="heating" ${rule.phase === "heating" ? "selected" : ""}>升温</option><option value="holding" ${rule.phase === "holding" ? "selected" : ""}>保温</option><option value="cooling" ${rule.phase === "cooling" ? "selected" : ""}>降温</option></select></label><label>开始<input data-key="start" type="datetime-local" value="${toDateTimeLocal(state.session.rows[rule.startIndex].date)}"></label><label>结束<input data-key="end" type="datetime-local" value="${toDateTimeLocal(state.session.rows[rule.endIndex].date)}"></label><label>窗口 min<input data-key="windowMinutes" type="number" min="1" value="${Number(rule.windowMinutes || 60)}"></label><label class="requirement-limit">${limitLabel}<input data-key="limit" type="number" min="0" step="0.1" value="${Number(limitValue == null ? 5 : limitValue)}"></label><button class="ghost remove-rule" title="删除要求">删除</button><div class="use-selection"><button class="ghost small">使用当前选中时间段</button><span class="rule-result ${result ? (result.passed ? "ok" : "bad") : ""}">${result ? (result.passed ? `通过 · 最大 ${result.maximumObserved.toFixed(2)}` : `${result.violationCount} 个违规 · 最大 ${result.maximumObserved.toFixed(2)}`) : "尚未校验"}</span></div>`;
       const update = (key, value) => mutateRequirement(index, item => {
         if (key === "start") item.startIndex = Math.min(item.endIndex, nearestRowIndex(value));
         else if (key === "end") item.endIndex = Math.max(item.startIndex, nearestRowIndex(value));
-        else if (key === "limit") { if (item.phase === "holding") item.maxFluctuation = Number(value); else item.maxRisePerHour = Number(value); }
+        else if (key === "limit") { if (item.phase === "holding") item.maxFluctuation = Number(value); else if (item.phase === "cooling") item.maxFallPerHour = Number(value); else item.maxRisePerHour = Number(value); }
         else if (["channel", "windowMinutes"].includes(key)) item[key] = Number(value);
         else item[key] = value;
       }, "修改客户验收要求");
@@ -427,7 +494,7 @@
     const badge = $("validationBadge");
     if (state.requirementResult.passed) {
       badge.className = "badge ok"; badge.textContent = "客户要求全部通过";
-      $("validationSummary").innerHTML = `已检查 <b>${state.requirementResult.checkedRules}</b> 条客户要求；所有升温速度和保温窗口温差均在限制内。`;
+      $("validationSummary").innerHTML = `已检查 <b>${state.requirementResult.checkedRules}</b> 条客户要求；所有升温速度、保温窗口温差和降温速度均在限制内。`;
       if (notify) showToast("客户验收要求全部通过");
     } else {
       badge.className = "badge error"; badge.textContent = "客户要求未通过";
@@ -840,6 +907,7 @@
   $("curveCanvas").addEventListener("contextmenu", e => e.preventDefault());
   $("addHeatingRequirementBtn").addEventListener("click", () => { const before = captureEditState(); addRequirement("heating"); pushUndo(before, "添加升温客户要求"); });
   $("addHoldingRequirementBtn").addEventListener("click", () => { const before = captureEditState(); addRequirement("holding"); pushUndo(before, "添加保温客户要求"); });
+  $("addCoolingRequirementBtn").addEventListener("click", () => { const before = captureEditState(); addRequirement("cooling"); pushUndo(before, "添加降温客户要求"); });
   $("validateRequirementsBtn").addEventListener("click", () => runRequirementValidation(true));
   $("requirementGate").addEventListener("change", setValidationWaiting);
   $("remapBtn").addEventListener("click", remapSession); $("exportPlrBtn").addEventListener("click", () => validateOutput(true)); $("exportCsvBtn").addEventListener("click", exportCsv); $("exportPngBtn").addEventListener("click", exportPng); $("exportProjectBtn").addEventListener("click", exportProject);

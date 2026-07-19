@@ -72,6 +72,14 @@ function maximumWindowRise(values, start, end, windowPoints) {
   return maximum;
 }
 
+function maximumWindowFall(values, start, end, windowPoints) {
+  let maximum = -Infinity;
+  for (let i = start + windowPoints; i <= end; i++) {
+    maximum = Math.max(maximum, values[i - windowPoints] - values[i]);
+  }
+  return maximum;
+}
+
 function maximumWindowFluctuation(values, start, end, windowPoints) {
   let maximum = 0;
   for (let i = start; i <= end; i++) {
@@ -230,6 +238,78 @@ test("真实燃烧保温修复满足每小时窗口温差不超过 5℃", () => 
     correlationMinutes: 16, eventsPerHour: 0.8, transitionMinutes: 10, seed: "holding-limit",
   });
   assert.ok(maximumWindowFluctuation(result, start, end, windowPoints) <= 5 + 1e-9);
+});
+
+test("真实燃烧预设来自升温保温降温样本并降低规则周期占比", () => {
+  const presets = core.REALISTIC_COMBUSTION_PRESETS;
+  assert.equal(presets.sample_heating.parameters.phase, "heating");
+  assert.equal(presets.sample_holding.parameters.phase, "holding");
+  assert.equal(presets.sample_cooling.parameters.phase, "cooling");
+  assert.ok(presets.sample_heating.parameters.cycleRatio <= 0.1);
+  assert.ok(presets.sample_cooling.parameters.preserveRatio > presets.irregular_strong.parameters.preserveRatio);
+  assert.ok(presets.sample_cooling.parameters.correlationMinutes > presets.sample_heating.parameters.correlationMinutes);
+});
+
+test("真实燃烧降温修复满足每小时最大降温限制且客户规则可通过", () => {
+  const source = Array.from({ length: 240 }, (_, index) => 320 - index * 0.22 + Math.sin(index / 8) * 2.4);
+  const start = 12, end = 220, windowPoints = 30;
+  const requirement = { id: "cool", channel: 1, phase: "cooling", startIndex: start, endIndex: end, windowMinutes: 60, maxFallPerHour: 5 };
+  assert.equal(core.validateCustomerRequirements(complianceSession(source), [requirement]).passed, false);
+  const result = core.applyOperation(source, start, end, {
+    mode: "realistic_combustion", phase: "cooling", intervalMinutes: 2,
+    windowMinutes: 60, maxFallPerHour: 5, amplitude: 3.8, preserveRatio: 0.76,
+    correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35,
+    cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 12, seed: "cooling-limit",
+  });
+  assert.ok(maximumWindowFall(result, start, end, windowPoints) <= 5 + 1e-9);
+  assert.deepEqual(result.slice(0, start), source.slice(0, start));
+  assert.deepEqual(result.slice(end + 1), source.slice(end + 1));
+  const session = complianceSession(result);
+  const validation = core.validateCustomerRequirements(session, [requirement]);
+  assert.equal(validation.passed, true);
+  assert.equal(validation.rules[0].phase, "cooling");
+  assert.ok(validation.rules[0].maximumObserved <= 5 + 1e-9);
+});
+
+test("降温修复遇到缺失采样点时使用临近有效锚点而不会产生断崖跳变", () => {
+  const source = Array.from({ length: 150 }, (_, index) => 250 - index * 0.25 + Math.sin(index / 7));
+  source[70] = null;
+  source[71] = null;
+  const result = core.applyOperation(source, 10, 130, {
+    mode: "realistic_combustion", phase: "cooling", intervalMinutes: 2,
+    windowMinutes: 60, maxFallPerHour: 5, amplitude: 3.8, preserveRatio: 0.76,
+    correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35,
+    cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 12,
+    onlyViolations: true, seed: "cooling-missing-anchor",
+  });
+  assert.equal(result[70], null);
+  assert.equal(result[71], null);
+  assert.ok(result[100] - result[101] < 5);
+  const requirement = { id: "cool-gap", channel: 1, phase: "cooling", startIndex: 10, endIndex: 130, windowMinutes: 60, maxFallPerHour: 5 };
+  const validation = core.validateCustomerRequirements(complianceSession(result), [requirement]);
+  assert.equal(validation.passed, true);
+  assert.ok(validation.rules[0].maximumObserved <= 5 + 1e-9);
+});
+
+test("多通道协同降温保持共同余热趋势并逐通道满足降温限制", () => {
+  const count = 220;
+  const source = {
+    1: Array.from({ length: count }, (_, index) => 360 - index * 0.2 + Math.sin(index / 9) * 2),
+    3: Array.from({ length: count }, (_, index) => 372 - index * 0.21 + Math.sin(index / 9 + 0.25) * 1.8),
+    5: Array.from({ length: count }, (_, index) => 348 - index * 0.19 + Math.sin(index / 9 - 0.2) * 2.2),
+  };
+  const result = core.applyCoordinatedOperation(source, 10, 205, {
+    mode: "realistic_combustion", phase: "cooling", intervalMinutes: 2,
+    windowMinutes: 60, maxFallPerHour: 5, amplitude: 3.8, preserveRatio: 0.76,
+    sharedRatio: 0.76, trendSyncRatio: 0.88, channelVariation: 0.15,
+    correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35,
+    cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 12,
+    onlyViolations: false, seed: "coordinated-cooling",
+  });
+  for (const channel of [1, 3, 5]) assert.ok(maximumWindowFall(result[channel], 10, 205, 30) <= 5 + 1e-9);
+  const increments = channel => result[channel].slice(11, 206).map((value, index) => value - result[channel][index + 10]);
+  assert.ok(correlation(increments(1), increments(3)) > 0.8);
+  assert.ok(correlation(increments(1), increments(5)) > 0.8);
 });
 
 test("多通道协同燃烧修复产生高度相关但不完全相同的共同波动", () => {
@@ -477,6 +557,7 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(indexHtml, /id="operationScope"/);
   assert.match(indexHtml, /id="coordinatedDrawBtn"/);
   assert.match(indexHtml, /id="channelCount"/);
+  assert.match(indexHtml, /id="addCoolingRequirementBtn"/);
   const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
   assert.match(appScript, /displayChannels/);
   assert.match(appScript, /normalizedDisplayChannels/);
@@ -484,5 +565,6 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(appScript, /applyCoordinatedStroke/);
   assert.match(appScript, /buildExportLegendLayout/);
   assert.match(appScript, /configureChartTooltip/);
+  assert.match(appScript, /sample_cooling/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });

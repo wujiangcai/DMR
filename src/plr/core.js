@@ -25,6 +25,33 @@
   const UINT16_MIN = 0;
   const UINT16_MAX = 65535;
   const UINT16_MODULUS = 65536;
+  const REALISTIC_COMBUSTION_PRESETS = Object.freeze({
+    sample_heating: Object.freeze({
+      label: "真实样本·升温（推荐）",
+      description: "依据真实升温段约1.9～2.9℃残差、较强惯性和非固定燃料扰动设置；周期成分较弱。",
+      parameters: Object.freeze({ phase: "heating", amplitude: 2.2, preserveRatio: 0.62, sharedRatio: 0.78, trendSyncRatio: 0.82, channelVariation: 0.12, correlationMinutes: 14, trendMinutes: 75, eventsPerHour: 1.1, cycleRatio: 0.10, pulseStrength: 1.0, transitionMinutes: 12 }),
+    }),
+    sample_holding: Object.freeze({
+      label: "真实样本·保温稳态",
+      description: "依据真实保温段约1.4～1.7℃残差和0.72～0.88通道联动设置；波动收敛但不形成规则正弦。",
+      parameters: Object.freeze({ phase: "holding", amplitude: 1.5, preserveRatio: 0.72, sharedRatio: 0.82, trendSyncRatio: 0.68, channelVariation: 0.08, correlationMinutes: 20, trendMinutes: 60, eventsPerHour: 0.55, cycleRatio: 0.06, pulseStrength: 0.7, transitionMinutes: 10 }),
+    }),
+    sample_cooling: Object.freeze({
+      label: "真实样本·降温余热",
+      description: "依据真实自然降温段约4.8℃残差、长相关惯性和0.74通道联动设置；保留散热滞后与偶发扰动。",
+      parameters: Object.freeze({ phase: "cooling", amplitude: 3.8, preserveRatio: 0.76, sharedRatio: 0.76, trendSyncRatio: 0.88, channelVariation: 0.15, correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35, cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 16 }),
+    }),
+    original_first: Object.freeze({
+      label: "原曲线优先·轻修复",
+      description: "最大程度保留原有细节，只削弱违规或机械重复部分，适合原始曲线总体可信的情况。",
+      parameters: Object.freeze({ amplitude: 1.2, preserveRatio: 0.85, sharedRatio: 0.68, trendSyncRatio: 0.65, channelVariation: 0.12, correlationMinutes: 12, trendMinutes: 45, eventsPerHour: 0.8, cycleRatio: 0.04, pulseStrength: 0.8, transitionMinutes: 8 }),
+    }),
+    irregular_strong: Object.freeze({
+      label: "强扰动·弱周期",
+      description: "降低周期占比、增加非对称燃料脉冲和通道差异，适合原曲线过于平滑或规律的区段。",
+      parameters: Object.freeze({ amplitude: 2.8, preserveRatio: 0.48, sharedRatio: 0.70, trendSyncRatio: 0.74, channelVariation: 0.18, correlationMinutes: 9, trendMinutes: 55, eventsPerHour: 1.8, cycleRatio: 0.03, pulseStrength: 1.35, transitionMinutes: 12 }),
+    }),
+  });
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -312,20 +339,46 @@
     return expanded;
   }
 
+  function normalizeCombustionPhase(phase) {
+    return phase === "holding" || phase === "cooling" ? phase : "heating";
+  }
+
+  function phaseLimit(phase, maxRise, maxFall, maxFluctuation) {
+    if (phase === "cooling") return maxFall;
+    if (phase === "holding") return maxFluctuation;
+    return maxRise;
+  }
+
+  function nearestFiniteRateAnchor(values, lo, currentIndex, windowPoints) {
+    const count = Math.max(1, windowPoints);
+    const desired = Math.max(lo, currentIndex - count);
+    const maxRadius = Math.min(count, currentIndex - lo);
+    for (let radius = 0; radius <= maxRadius; radius++) {
+      const before = desired - radius;
+      if (before >= lo && before < currentIndex && Number.isFinite(values[before])) return { index: before, value: values[before] };
+      const after = desired + radius;
+      if (radius > 0 && after >= lo && after < currentIndex && Number.isFinite(values[after])) return { index: after, value: values[after] };
+    }
+    return null;
+  }
+
   function detectViolationMask(values, lo, hi, phase, windowPoints, limit) {
     const mask = Array(values.length).fill(false);
-    if (phase === "heating") {
+    if (phase === "heating" || phase === "cooling") {
+      const directedChange = (previous, current) => phase === "cooling" ? previous - current : current - previous;
       if (hi - lo < windowPoints) {
         const durationPoints = Math.max(1, hi - lo);
         const allowed = limit * durationPoints / windowPoints;
-        if (Number.isFinite(values[lo]) && Number.isFinite(values[hi]) && values[hi] - values[lo] > allowed) {
+        if (Number.isFinite(values[lo]) && Number.isFinite(values[hi]) && directedChange(values[lo], values[hi]) > allowed) {
           for (let i = lo; i <= hi; i++) mask[i] = true;
         }
       } else {
         for (let i = lo + windowPoints; i <= hi; i++) {
-          const previous = values[i - windowPoints], current = values[i];
-          if (!Number.isFinite(previous) || !Number.isFinite(current) || current - previous <= limit) continue;
-          for (let j = i - windowPoints; j <= i; j++) mask[j] = true;
+          const current = values[i], anchor = nearestFiniteRateAnchor(values, lo, i, windowPoints);
+          if (!anchor || !Number.isFinite(current)) continue;
+          const allowed = limit * (i - anchor.index) / windowPoints;
+          if (directedChange(anchor.value, current) <= allowed) continue;
+          for (let j = anchor.index; j <= i; j++) mask[j] = true;
         }
       }
     } else {
@@ -347,20 +400,74 @@
   function enforceHeatingRate(values, lo, hi, windowPoints, maxRise, random = null, activeMask = null) {
     const result = values.slice();
     const count = Math.max(1, windowPoints);
-    const anchor = result[lo];
     for (let i = lo + 1; i <= hi; i++) {
       if (!Number.isFinite(result[i])) continue;
-      let upper = null;
-      if (i - lo < count && Number.isFinite(anchor) && (!activeMask || activeMask[i])) upper = anchor + maxRise * (i - lo) / count;
-      else if (Number.isFinite(result[i - count])) upper = result[i - count] + maxRise;
+      const anchor = nearestFiniteRateAnchor(result, lo, i, count);
+      const shouldConstrain = i - lo >= count || !activeMask || activeMask[i];
+      const upper = anchor && shouldConstrain
+        ? anchor.value + maxRise * (i - anchor.index) / count
+        : null;
       if (upper == null || result[i] <= upper + 1e-12) continue;
       const overshoot = result[i] - upper;
       const irregularHeadroom = random
-        ? Math.min(maxRise * 0.08 * random(), overshoot * 0.35)
+        ? Math.min(maxRise * 0.28 * random(), overshoot * 0.45)
         : 0;
       result[i] = upper - irregularHeadroom;
     }
     return result;
+  }
+
+  function enforceCoolingRate(values, lo, hi, windowPoints, maxFall, random = null, activeMask = null) {
+    const result = values.slice();
+    const count = Math.max(1, windowPoints);
+    for (let i = lo + 1; i <= hi; i++) {
+      if (!Number.isFinite(result[i])) continue;
+      const anchor = nearestFiniteRateAnchor(result, lo, i, count);
+      const shouldConstrain = i - lo >= count || !activeMask || activeMask[i];
+      const lower = anchor && shouldConstrain
+        ? anchor.value - maxFall * (i - anchor.index) / count
+        : null;
+      if (lower == null || result[i] >= lower - 1e-12) continue;
+      const undershoot = lower - result[i];
+      const irregularHeadroom = random
+        ? Math.min(maxFall * 0.28 * random(), undershoot * 0.45)
+        : 0;
+      result[i] = lower + irregularHeadroom;
+    }
+    return result;
+  }
+
+  function generateCombustionDriver(length, lo, hi, operation, number, random, phase, amplitude, interval, correlationMinutes) {
+    const cycleRatio = clamp(number("cycleRatio", 0.10), 0, 0.6);
+    const pulseStrength = clamp(number("pulseStrength", 1), 0, 3);
+    const eventsPerHour = Math.max(0, number("eventsPerHour", 0.7));
+    const rho = Math.exp(-interval / correlationMinutes);
+    const slowRho = Math.exp(-interval / (correlationMinutes * 5));
+    let ou = gaussianRandom(random) * amplitude * 0.35;
+    let slow = gaussianRandom(random) * amplitude * 0.15;
+    let pulse = 0, phaseAngle = random() * 2 * Math.PI, secondaryAngle = random() * 2 * Math.PI;
+    let wanderingPeriod = 35 + random() * 100, secondaryPeriod = 55 + random() * 150, envelope = 0.65 + random() * 0.45;
+    const driver = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      ou = rho * ou + Math.sqrt(Math.max(0, 1 - rho * rho)) * gaussianRandom(random) * amplitude;
+      slow = slowRho * slow + Math.sqrt(Math.max(0, 1 - slowRho * slowRho)) * gaussianRandom(random) * amplitude * 0.45;
+      wanderingPeriod = clamp(wanderingPeriod + gaussianRandom(random) * 2.4 + (random() < 0.012 ? gaussianRandom(random) * 14 : 0), 24, 210);
+      secondaryPeriod = clamp(secondaryPeriod + gaussianRandom(random) * 1.6, 45, 260);
+      phaseAngle += 2 * Math.PI * interval / wanderingPeriod;
+      secondaryAngle += 2 * Math.PI * interval / secondaryPeriod;
+      envelope = clamp(envelope * 0.965 + (0.45 + random() * 0.75) * 0.035, 0.35, 1.25);
+      if (random() < eventsPerHour * interval / 60) {
+        const preferredDirection = phase === "heating" ? 1 : phase === "cooling" ? -1 : 0;
+        const direction = preferredDirection && random() < 0.64 ? preferredDirection : (random() < 0.5 ? -1 : 1);
+        pulse += direction * amplitude * pulseStrength * (0.28 + random() * 0.82);
+      }
+      pulse *= 0.80 + random() * 0.15;
+      const irregularCycle = (Math.sin(phaseAngle + 0.24 * Math.sin(secondaryAngle)) + 0.34 * Math.sin(secondaryAngle + 0.19 * Math.sin(phaseAngle)))
+        * amplitude * cycleRatio * envelope;
+      const micro = gaussianRandom(random) * amplitude * 0.055;
+      driver[i] = clamp(ou * 0.52 + slow * 0.24 + irregularCycle + pulse + micro, -amplitude * 2.35, amplitude * 2.35);
+    }
+    return driver;
   }
 
   function enforceHoldingFluctuation(values, lo, hi, windowPoints, maxFluctuation) {
@@ -384,46 +491,35 @@
 
   function realisticCombustion(values, lo, hi, operation, number) {
     const interval = Math.max(0.01, number("intervalMinutes", 2));
-    const phase = operation.phase === "holding" ? "holding" : "heating";
+    const phase = normalizeCombustionPhase(operation.phase);
     const windowMinutes = Math.max(interval, number("windowMinutes", 60));
     const windowPoints = Math.max(1, Math.round(windowMinutes / interval));
     const maxRise = Math.max(0, number("maxRisePerHour", 5)) * windowMinutes / 60;
+    const maxFall = Math.max(0, number("maxFallPerHour", 5)) * windowMinutes / 60;
     const maxFluctuation = Math.max(0, number("maxFluctuation", 5));
-    const amplitude = Math.max(0, number("amplitude", phase === "holding" ? 1.2 : 1.8));
+    const defaultAmplitude = phase === "holding" ? 1.2 : phase === "cooling" ? 3.2 : 1.8;
+    const amplitude = Math.max(0, number("amplitude", defaultAmplitude));
     const preserve = clamp(number("preserveRatio", 0.65), 0, 1);
     const correlationMinutes = Math.max(interval, number("correlationMinutes", 18));
-    const trendMinutes = Math.max(interval, number("trendMinutes", phase === "holding" ? 45 : 90));
-    const eventsPerHour = Math.max(0, number("eventsPerHour", 0.7));
+    const defaultTrendMinutes = phase === "holding" ? 45 : phase === "cooling" ? 120 : 90;
+    const trendMinutes = Math.max(interval, number("trendMinutes", defaultTrendMinutes));
     const transitionMinutes = Math.max(0, number("transitionMinutes", 10));
     const transitionPoints = Math.round(transitionMinutes / interval);
     const onlyViolations = operation.onlyViolations === true || String(operation.onlyViolations).toLowerCase() === "true";
     const random = seededRandom(operation.seed == null || operation.seed === "" ? "20260719" : operation.seed);
     const trendWindow = Math.max(3, Math.round(trendMinutes / interval) | 1);
     const baseline = movingAverageSegment(values, lo, hi, trendWindow);
-    const rho = Math.exp(-interval / correlationMinutes);
-    const slowRho = Math.exp(-interval / (correlationMinutes * 5));
-    let ou = gaussianRandom(random) * amplitude * 0.35;
-    let slow = gaussianRandom(random) * amplitude * 0.15;
-    let pulse = 0;
-    let phaseAngle = random() * 2 * Math.PI;
-    let wanderingPeriod = 35 + random() * 100;
+    const syntheticDriver = generateCombustionDriver(values.length, lo, hi, operation, number, random, phase, amplitude, interval, correlationMinutes);
     const generated = values.slice();
     for (let i = lo; i <= hi; i++) {
       if (!Number.isFinite(values[i])) continue;
-      ou = rho * ou + Math.sqrt(Math.max(0, 1 - rho * rho)) * gaussianRandom(random) * amplitude;
-      slow = slowRho * slow + Math.sqrt(Math.max(0, 1 - slowRho * slowRho)) * gaussianRandom(random) * amplitude * 0.45;
-      wanderingPeriod = clamp(wanderingPeriod + gaussianRandom(random) * 1.8, 25, 180);
-      phaseAngle += 2 * Math.PI * interval / wanderingPeriod;
-      if (random() < eventsPerHour * interval / 60) pulse += (random() * 2 - 1) * amplitude * (0.35 + random() * 0.75);
-      pulse *= 0.82 + random() * 0.14;
-      const irregularCycle = Math.sin(phaseAngle + 0.28 * Math.sin(phaseAngle * 0.37)) * amplitude * 0.32;
       const originalResidual = clamp(values[i] - baseline[i], -amplitude * 1.8, amplitude * 1.8);
-      const syntheticResidual = clamp(ou * 0.48 + slow * 0.22 + irregularCycle + pulse, -amplitude * 2.1, amplitude * 2.1);
+      const syntheticResidual = syntheticDriver[i];
       generated[i] = baseline[i] + preserve * originalResidual + (1 - preserve) * syntheticResidual;
     }
 
     let mask = Array(values.length).fill(true);
-    if (onlyViolations) mask = expandMask(detectViolationMask(values, lo, hi, phase, windowPoints, phase === "heating" ? maxRise : maxFluctuation), lo, hi, transitionPoints);
+    if (onlyViolations) mask = expandMask(detectViolationMask(values, lo, hi, phase, windowPoints, phaseLimit(phase, maxRise, maxFall, maxFluctuation)), lo, hi, transitionPoints);
     const result = values.slice();
     for (let i = lo; i <= hi; i++) if (mask[i] && Number.isFinite(generated[i])) result[i] = generated[i];
 
@@ -439,9 +535,9 @@
         result[i] = values[i] * (1 - weight) + result[i] * weight;
       }
     }
-    return phase === "heating"
-      ? enforceHeatingRate(result, lo, hi, windowPoints, maxRise, random, onlyViolations ? mask : null)
-      : enforceHoldingFluctuation(result, lo, hi, windowPoints, maxFluctuation);
+    if (phase === "heating") return enforceHeatingRate(result, lo, hi, windowPoints, maxRise, random, onlyViolations ? mask : null);
+    if (phase === "cooling") return enforceCoolingRate(result, lo, hi, windowPoints, maxFall, random, onlyViolations ? mask : null);
+    return enforceHoldingFluctuation(result, lo, hi, windowPoints, maxFluctuation);
   }
 
   function applyCoordinatedOperation(seriesByChannel, start, end, operation = {}) {
@@ -457,20 +553,22 @@
     const hi = Math.max(0, Math.min(length - 1, Math.max(start, end)));
     const number = (key, fallback = 0) => Number.isFinite(Number(operation[key])) ? Number(operation[key]) : fallback;
     const interval = Math.max(0.01, number("intervalMinutes", 2));
-    const phase = operation.phase === "holding" ? "holding" : "heating";
+    const phase = normalizeCombustionPhase(operation.phase);
     const windowMinutes = Math.max(interval, number("windowMinutes", 60));
     const windowPoints = Math.max(1, Math.round(windowMinutes / interval));
     const maxRise = Math.max(0, number("maxRisePerHour", 5)) * windowMinutes / 60;
+    const maxFall = Math.max(0, number("maxFallPerHour", 5)) * windowMinutes / 60;
     const maxFluctuation = Math.max(0, number("maxFluctuation", 5));
-    const amplitude = Math.max(0, number("amplitude", phase === "holding" ? 1.2 : 1.8));
+    const defaultAmplitude = phase === "holding" ? 1.2 : phase === "cooling" ? 3.2 : 1.8;
+    const amplitude = Math.max(0, number("amplitude", defaultAmplitude));
     const preserve = clamp(number("preserveRatio", 0.45), 0, 1);
     const sharedRatio = clamp(number("sharedRatio", 0.85), 0, 1);
     const trendSyncRatio = clamp(number("trendSyncRatio", 0.8), 0, 1);
     const channelVariation = clamp(number("channelVariation", 0.08), 0, 0.5);
     const commonOffset = number("commonOffset", 0);
     const correlationMinutes = Math.max(interval, number("correlationMinutes", 18));
-    const trendMinutes = Math.max(interval, number("trendMinutes", phase === "holding" ? 45 : 90));
-    const eventsPerHour = Math.max(0, number("eventsPerHour", 0.7));
+    const defaultTrendMinutes = phase === "holding" ? 45 : phase === "cooling" ? 120 : 90;
+    const trendMinutes = Math.max(interval, number("trendMinutes", defaultTrendMinutes));
     const transitionMinutes = Math.max(0, number("transitionMinutes", 10));
     const transitionPoints = Math.round(transitionMinutes / interval);
     const onlyViolations = operation.onlyViolations === true || String(operation.onlyViolations).toLowerCase() === "true";
@@ -502,28 +600,13 @@
       commonTrend[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : 0;
     }
 
-    const rho = Math.exp(-interval / correlationMinutes);
-    const slowRho = Math.exp(-interval / (correlationMinutes * 5));
-    let ou = gaussianRandom(random) * amplitude * 0.35;
-    let slow = gaussianRandom(random) * amplitude * 0.15;
-    let pulse = 0, phaseAngle = random() * 2 * Math.PI, wanderingPeriod = 35 + random() * 100;
-    const sharedResidual = Array(length).fill(0);
-    for (let i = lo; i <= hi; i++) {
-      ou = rho * ou + Math.sqrt(Math.max(0, 1 - rho * rho)) * gaussianRandom(random) * amplitude;
-      slow = slowRho * slow + Math.sqrt(Math.max(0, 1 - slowRho * slowRho)) * gaussianRandom(random) * amplitude * 0.45;
-      wanderingPeriod = clamp(wanderingPeriod + gaussianRandom(random) * 1.8, 25, 180);
-      phaseAngle += 2 * Math.PI * interval / wanderingPeriod;
-      if (random() < eventsPerHour * interval / 60) pulse += (random() * 2 - 1) * amplitude * (0.35 + random() * 0.75);
-      pulse *= 0.82 + random() * 0.14;
-      const irregularCycle = Math.sin(phaseAngle + 0.28 * Math.sin(phaseAngle * 0.37)) * amplitude * 0.32;
-      sharedResidual[i] = clamp(ou * 0.48 + slow * 0.22 + irregularCycle + pulse, -amplitude * 2.1, amplitude * 2.1);
-    }
+    const sharedResidual = generateCombustionDriver(length, lo, hi, operation, number, random, phase, amplitude, interval, correlationMinutes);
 
     let mask = Array(length).fill(true);
     if (onlyViolations) {
       mask = Array(length).fill(false);
       for (const [, values] of entries) {
-        const channelMask = detectViolationMask(values, lo, hi, phase, windowPoints, phase === "heating" ? maxRise : maxFluctuation);
+        const channelMask = detectViolationMask(values, lo, hi, phase, windowPoints, phaseLimit(phase, maxRise, maxFall, maxFluctuation));
         for (let i = lo; i <= hi; i++) mask[i] = mask[i] || channelMask[i];
       }
       mask = expandMask(mask, lo, hi, transitionPoints);
@@ -582,8 +665,10 @@
       }
       rawGroupDriver[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : (i > lo ? rawGroupDriver[i - 1] : 0);
     }
-    const constrainedGroupDriver = enforceHeatingRate(
-      rawGroupDriver, lo, hi, windowPoints, maxRise * 0.82,
+    const enforceRate = phase === "cooling" ? enforceCoolingRate : enforceHeatingRate;
+    const rateLimit = phase === "cooling" ? maxFall : maxRise;
+    const constrainedGroupDriver = enforceRate(
+      rawGroupDriver, lo, hi, windowPoints, rateLimit * 0.82,
       seededRandom(`${seed}|group-constraint`), onlyViolations ? mask : null,
     );
     const independentWeight = Math.max(0.06, Math.min(0.25, 1 - sharedRatio));
@@ -596,8 +681,8 @@
         const independent = clamp(output[channel][i] - rawCommon, -amplitude * 1.5, amplitude * 1.5);
         output[channel][i] = anchor.value + constrainedGroupDriver[i] - constrainedGroupDriver[anchor.index] + independent * independentWeight;
       }
-      output[channel] = enforceHeatingRate(
-        output[channel], lo, hi, windowPoints, maxRise,
+      output[channel] = enforceRate(
+        output[channel], lo, hi, windowPoints, rateLimit,
         seededRandom(`${seed}|final-constraint`), onlyViolations ? mask : null,
       );
     }
@@ -726,7 +811,7 @@
       const requirement = requirements[ruleIndex];
       const channel = Number(requirement.channel);
       assert(session.channels[channel], `客户要求中的通道 ${channel} 不可编辑`);
-      const phase = requirement.phase === "holding" ? "holding" : "heating";
+      const phase = normalizeCombustionPhase(requirement.phase);
       const [start, end] = resolveRequirementRange(session, requirement);
       const interval = session.excel.intervalMinutes || session.plr.layout.intervalMinutes || 2;
       const windowMinutes = Math.max(interval, Number(requirement.windowMinutes || 60));
@@ -734,28 +819,31 @@
       const values = session.channels[channel].targets;
       const ruleResult = {
         ruleIndex, id: requirement.id || `rule-${ruleIndex + 1}`,
-        name: requirement.name || (phase === "heating" ? "升温要求" : "保温要求"),
+        name: requirement.name || (phase === "heating" ? "升温要求" : phase === "cooling" ? "降温要求" : "保温要求"),
         channel, phase, start, end, startTime: session.rows[start].time, endTime: session.rows[end].time,
         windowMinutes, checkedWindows: 0, violationCount: 0, maximumObserved: null, limit: null, passed: true,
       };
-      if (phase === "heating") {
-        const limit = Math.max(0, Number(requirement.maxRisePerHour == null ? 5 : requirement.maxRisePerHour));
+      if (phase === "heating" || phase === "cooling") {
+        const limitValue = phase === "cooling" ? requirement.maxFallPerHour : requirement.maxRisePerHour;
+        const limit = Math.max(0, Number(limitValue == null ? 5 : limitValue));
+        const directedChange = (previous, current) => phase === "cooling" ? previous - current : current - previous;
         ruleResult.limit = limit;
         if (end - start < windowPoints) {
           const hours = Math.max(interval, (end - start) * interval) / 60;
           if (Number.isFinite(values[start]) && Number.isFinite(values[end])) {
-            const observed = Math.max(0, values[end] - values[start]) / hours;
+            const observed = Math.max(0, directedChange(values[start], values[end])) / hours;
             ruleResult.checkedWindows = 1; ruleResult.maximumObserved = observed;
             if (observed > limit + 1e-9) violations.push({ ruleIndex, channel, phase, startIndex: start, endIndex: end, time: session.rows[end].time, observed, limit });
           }
         } else {
           for (let i = start + windowPoints; i <= end; i++) {
-            const previous = values[i - windowPoints], current = values[i];
-            if (!Number.isFinite(previous) || !Number.isFinite(current)) continue;
-            const observed = Math.max(0, current - previous) * 60 / windowMinutes;
+            const current = values[i], anchor = nearestFiniteRateAnchor(values, start, i, windowPoints);
+            if (!anchor || !Number.isFinite(current)) continue;
+            const elapsedMinutes = (i - anchor.index) * interval;
+            const observed = Math.max(0, directedChange(anchor.value, current)) * 60 / elapsedMinutes;
             ruleResult.checkedWindows++;
             ruleResult.maximumObserved = Math.max(ruleResult.maximumObserved == null ? -Infinity : ruleResult.maximumObserved, observed);
-            if (observed > limit + 1e-9) violations.push({ ruleIndex, channel, phase, startIndex: i - windowPoints, endIndex: i, time: session.rows[i].time, observed, limit });
+            if (observed > limit + 1e-9) violations.push({ ruleIndex, channel, phase, startIndex: anchor.index, endIndex: i, time: session.rows[i].time, observed, limit });
           }
         }
       } else {
@@ -948,6 +1036,7 @@
   return {
     DEFAULT_LAYOUT,
     INVALID_VALUES,
+    REALISTIC_COMBUSTION_PRESETS,
     formatDate,
     parseDateText,
     parseExcelBytes,
