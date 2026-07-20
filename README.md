@@ -10,7 +10,9 @@ DMR 3.20 / VX5300 `.PLR` 温度曲线可视化编辑器。
 启动DMR曲线编辑器.cmd
 ```
 
-浏览器会打开 `http://127.0.0.1:17378`。运行界面不需要 Python，也不需要安装 npm 依赖；项目已经包含离线 Excel 解析器。
+启动器会先启动本地服务，等健康检查通过后再打开浏览器 `http://127.0.0.1:17378`。重复双击不会重复启动服务，只会重新打开页面。运行界面不需要 Python，也不需要安装 npm 依赖；项目已经包含离线 Excel 解析器。若启动失败，错误记录在 `.runtime/dmr-server-error.log`。
+
+给其他 Windows 用户使用时，推荐下载 GitHub Release 中的 `DMR-Curve-Studio-*-win-x64.zip`，完整解压后双击启动脚本。便携包已包含 Node.js 运行时，对方不需要单独安装开发环境。维护者可运行 `npm.cmd run package:win` 重新生成 `dist` 下的发布包和 SHA-256 校验文件。
 
 推荐流程：
 
