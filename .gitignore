@@ -6,5 +6,6 @@ __pycache__/
 output/playwright/
 outputs/
 dist/
+.runtime/
 *.log
 *.pid

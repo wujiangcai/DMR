@@ -715,6 +715,67 @@
     return output;
   }
 
+  /**
+   * 补全热电偶断连产生的空白点。
+   *
+   * 默认使用空白段前后的有效温度做线性插值；如果空白位于曲线开头或结尾，
+   * 则使用唯一一侧的有效温度。maxGapPoints 为 0 时不限制空白长度。
+   */
+  function fillMissingValues(values, start = 0, end = values.length - 1, options = {}) {
+    assert(Array.isArray(values), "空白补全需要温度数组");
+    if (!values.length) return [];
+    const result = values.slice();
+    const lo = Math.max(0, Math.min(values.length - 1, Math.min(start, end)));
+    const hi = Math.max(0, Math.min(values.length - 1, Math.max(start, end)));
+    const method = ["linear", "nearest", "constant"].includes(options.method) ? options.method : "linear";
+    const interval = Math.max(0.000001, Number(options.intervalMinutes) || 1);
+    const minuteLimit = Number(options.maxGapMinutes);
+    const configuredPointLimit = Math.max(0, Math.floor(Number(options.maxGapPoints) || 0));
+    const hasPointLimit = Number.isFinite(minuteLimit) && minuteLimit > 0 || configuredPointLimit > 0;
+    const pointLimit = Number.isFinite(minuteLimit) && minuteLimit > 0
+      ? Math.max(0, Math.floor(minuteLimit / interval + 1e-9))
+      : configuredPointLimit;
+    const constantValue = Number(options.constantValue);
+    if (method === "constant") assert(Number.isFinite(constantValue), "指定温度必须是有效数字");
+
+    let index = lo;
+    while (index <= hi) {
+      if (Number.isFinite(result[index])) { index++; continue; }
+      const selectedGapStart = index;
+      let fullGapStart = selectedGapStart;
+      while (fullGapStart > 0 && !Number.isFinite(result[fullGapStart - 1])) fullGapStart--;
+      let fullGapEnd = selectedGapStart;
+      while (fullGapEnd + 1 < result.length && !Number.isFinite(result[fullGapEnd + 1])) fullGapEnd++;
+      const selectedGapEnd = Math.min(hi, fullGapEnd);
+      index = selectedGapEnd + 1;
+      const gapLength = fullGapEnd - fullGapStart + 1;
+      if (hasPointLimit && gapLength > pointLimit) continue;
+
+      const left = fullGapStart - 1;
+      const right = fullGapEnd + 1;
+      const hasLeft = left >= 0;
+      const hasRight = right < result.length;
+      if (method !== "constant" && !hasLeft && !hasRight) continue;
+
+      for (let current = selectedGapStart; current <= selectedGapEnd; current++) {
+        if (method === "constant") {
+          result[current] = constantValue;
+        } else if (method === "nearest") {
+          if (!hasLeft) result[current] = result[right];
+          else if (!hasRight) result[current] = result[left];
+          else result[current] = current - left <= right - current ? result[left] : result[right];
+        } else if (!hasLeft) {
+          result[current] = result[right];
+        } else if (!hasRight) {
+          result[current] = result[left];
+        } else {
+          result[current] = result[left] + (result[right] - result[left]) * (current - left) / (right - left);
+        }
+      }
+    }
+    return result;
+  }
+
   function applyOperation(values, start, end, operation = {}) {
     const result = values.slice();
     const lo = Math.max(0, Math.min(values.length - 1, Math.min(start, end)));
@@ -755,6 +816,9 @@
           if (samples.length) result[i] = samples.reduce((a, b) => a + b, 0) / samples.length;
         }
         break;
+      }
+      case "fill_gaps": {
+        return fillMissingValues(values, lo, hi, operation);
       }
       case "sine": {
         const amplitude = number("amplitude");
@@ -880,17 +944,28 @@
       for (let rowIndex = 0; rowIndex < session.rows.length; rowIndex++) {
         const original = series.original[rowIndex];
         const target = series.targets[rowIndex];
-        if (original == null || target == null || !Number.isFinite(target) || Math.abs(target - original) < 1e-12) continue;
+        if (!Number.isFinite(target) || (Number.isFinite(original) && Math.abs(target - original) < 1e-12)) continue;
         const physicalRecordIndex = session.rows[rowIndex].physicalRecordIndex;
         const rawOld = readRaw(session.plr, physicalRecordIndex, channel);
-        const deltaRaw = Math.round((target - original) * session.scale);
-        assert(Math.abs(deltaRaw) < UINT16_MODULUS,
-          `通道 ${channel} ${session.rows[rowIndex].time} 单次修改温差过大，超出16位原始字的唯一可表达范围`);
-        const rawUnwrapped = rawOld + deltaRaw, rawNew = normalizeRawWord(rawUnwrapped);
+        const gapFilled = !Number.isFinite(original);
+        let deltaRaw, rawUnwrapped, rawNew;
+        if (gapFilled) {
+          rawUnwrapped = Math.round(target * session.scale);
+          assert(rawUnwrapped >= UINT16_MIN && rawUnwrapped <= UINT16_MAX,
+            `通道 ${channel} ${session.rows[rowIndex].time} 的补全温度超出16位原始字可表达范围`);
+          rawNew = rawUnwrapped;
+          deltaRaw = rawNew - rawOld;
+        } else {
+          deltaRaw = Math.round((target - original) * session.scale);
+          assert(Math.abs(deltaRaw) < UINT16_MODULUS,
+            `通道 ${channel} ${session.rows[rowIndex].time} 单次修改温差过大，超出16位原始字的唯一可表达范围`);
+          rawUnwrapped = rawOld + deltaRaw;
+          rawNew = normalizeRawWord(rawUnwrapped);
+        }
         edits.push({
           rowIndex, time: session.rows[rowIndex].time, channel, physicalRecordIndex, fieldIndex: channel,
-          originalTemp: original, targetTemp: target, deltaTemp: target - original,
-          rawOld, rawNew, deltaRaw, rawWrapped: rawNew !== rawUnwrapped,
+          originalTemp: gapFilled ? null : original, targetTemp: target, deltaTemp: gapFilled ? null : target - original,
+          rawOld, rawNew, deltaRaw, rawWrapped: rawNew !== rawUnwrapped, gapFilled,
         });
       }
     }
@@ -931,9 +1006,9 @@
   }
 
   function exportCsv(session, edits) {
-    const header = ["time", "channel", "physical_record_index", "original_temp", "target_temp", "delta_temp", "raw_old", "raw_new", "delta_raw", "raw_wrapped"];
+    const header = ["time", "channel", "physical_record_index", "original_temp", "target_temp", "delta_temp", "raw_old", "raw_new", "delta_raw", "raw_wrapped", "gap_filled"];
     const lines = [header.join(",")];
-    for (const e of edits) lines.push([e.time, e.channel, e.physicalRecordIndex, e.originalTemp, e.targetTemp, e.deltaTemp, e.rawOld, e.rawNew, e.deltaRaw, e.rawWrapped ? "yes" : "no"].map(csvEscape).join(","));
+    for (const e of edits) lines.push([e.time, e.channel, e.physicalRecordIndex, e.originalTemp, e.targetTemp, e.deltaTemp, e.rawOld, e.rawNew, e.deltaRaw, e.rawWrapped ? "yes" : "no", e.gapFilled ? "yes" : "no"].map(csvEscape).join(","));
     return "\ufeff" + lines.join("\r\n") + "\r\n";
   }
 
@@ -990,9 +1065,9 @@
       for (const channel of session.usableChannels) {
         const original = session.channels[channel].original[rowIndex];
         const expected = session.channels[channel].targets[rowIndex];
-        if (!Number.isFinite(original) || !Number.isFinite(expected)) continue;
+        if (!Number.isFinite(expected)) continue;
         const actual = exportedRow.channels[channel];
-        const planned = Math.abs(expected - original) > 1e-12;
+        const planned = !Number.isFinite(original) || Math.abs(expected - original) > 1e-12;
         result.validCompared++;
         if (planned) result.plannedTotal++; else result.unchangedTotal++;
         const ok = Number.isFinite(actual) && Math.abs(actual - expected) <= tolerance;
@@ -1020,7 +1095,7 @@
     for (let i = start; i <= end; i++) {
       if (Number.isFinite(series.targets[i])) values.push(series.targets[i]);
       if (Number.isFinite(series.original[i])) original.push(series.original[i]);
-      if (Number.isFinite(series.targets[i]) && Number.isFinite(series.original[i]) && Math.abs(series.targets[i] - series.original[i]) > 1e-12) changed++;
+      if (Number.isFinite(series.targets[i]) && (!Number.isFinite(series.original[i]) || Math.abs(series.targets[i] - series.original[i]) > 1e-12)) changed++;
     }
     if (!values.length) return { count: 0 };
     return {
@@ -1050,6 +1125,7 @@
     cloneTargets,
     restoreTargets,
     applyOperation,
+    fillMissingValues,
     applyCoordinatedOperation,
     applyCoordinatedStroke,
     validateCustomerRequirements,

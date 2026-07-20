@@ -118,6 +118,18 @@ test("解析 DMR Excel，识别通道和无效温度", () => {
   assert.equal(parsed.rows[0].channels[2], null);
 });
 
+test("断连空白支持线性、最近值、指定温度及最长空白限制", () => {
+  const source = [null, 10, null, null, 16, null, 20, null];
+  assert.deepEqual(core.fillMissingValues(source, 0, source.length - 1, { method: "linear" }), [10, 10, 12, 14, 16, 18, 20, 20]);
+  assert.deepEqual(core.fillMissingValues(source, 2, 5, { method: "nearest" }), [null, 10, 10, 16, 16, 16, 20, null]);
+  assert.deepEqual(core.fillMissingValues(source, 2, 5, { method: "constant", constantValue: 88 }), [null, 10, 88, 88, 16, 88, 20, null]);
+  assert.deepEqual(core.fillMissingValues(source, 0, source.length - 1, { method: "linear", maxGapPoints: 1 }), [10, 10, null, null, 16, 18, 20, 20]);
+  assert.deepEqual(core.applyOperation(source, 0, source.length - 1, { mode: "fill_gaps", method: "linear", intervalMinutes: 2, maxGapMinutes: 2 }), [10, 10, null, null, 16, 18, 20, 20]);
+  assert.deepEqual(core.fillMissingValues([10, null, null, null, null, 20], 2, 3, { method: "linear", maxGapPoints: 2 }), [10, null, null, null, null, 20], "局部选区不能绕过整段空白长度限制");
+  assert.deepEqual(core.fillMissingValues([10, null, null, null, 20], 0, 4, { method: "linear", intervalMinutes: 2, maxGapMinutes: 5 }), [10, null, null, null, 20], "分钟限制不能通过四舍五入放宽到更长空白");
+  assert.deepEqual(source, [null, 10, null, null, 16, null, 20, null], "补全不能修改输入数组");
+});
+
 test("扩展记录结构支持16个及更多温度通道且不发生字段越界", () => {
   const channelCount = 24, dataOffset = 4, recordSize = (channelCount + 1) * 2, totalRecords = 3;
   const bytes = new Uint8Array(dataOffset + recordSize * totalRecords); bytes.set(Buffer.from("MCA\0"));
@@ -168,6 +180,53 @@ test("按真实温差修改 raw，且只改变计划字段", () => {
   const modified = { ...plr, data: result.buffer };
   assert.equal(core.readRaw(modified, 0, 1), 35 * 48);
   assert.equal(core.readRaw(modified, 0, 2), 35 * 48);
+});
+
+test("补全无原始温度的断连点时按目标绝对温度写入 PLR", () => {
+  const plr = syntheticPlr(), excel = syntheticExcel();
+  const session = core.buildSession(plr, excel, core.alignExcelToPlr(excel, plr));
+  session.channels[1].original[1] = null;
+  session.channels[1].targets[1] = 25;
+  const output = core.createModifiedPlr(session), edit = output.edits[0];
+  assert.equal(output.edits.length, 1);
+  assert.equal(edit.gapFilled, true);
+  assert.equal(edit.originalTemp, null);
+  assert.equal(edit.targetTemp, 25);
+  assert.equal(edit.rawNew, 25 * 48);
+  assert.equal(core.readRaw({ ...plr, data: output.buffer }, edit.physicalRecordIndex, 1), 25 * 48);
+  assert.match(core.exportCsv(session, output.edits), /gap_filled/);
+  assert.match(core.exportCsv(session, output.edits), /yes\r?\n$/);
+  session.channels[1].targets[1] = -1;
+  assert.throws(() => core.createModifiedPlr(session), /补全温度超出16位原始字可表达范围/);
+  session.channels[1].targets[1] = 1400;
+  assert.throws(() => core.createModifiedPlr(session), /补全温度超出16位原始字可表达范围/);
+});
+
+test("真实 DAT0131 断连点批量补全后只生成安全的绝对温度写入", () => {
+  const root = path.join(__dirname, "..");
+  const plr = core.parsePlr(fs.readFileSync(path.join(root, "fixtures", "DAT0131.PLR")));
+  const excel = core.parseExcelBytes(fs.readFileSync(path.join(root, "fixtures", "curve.xls")));
+  const session = core.buildSession(plr, excel, core.alignExcelToPlr(excel, plr));
+  const series = session.channels[3];
+  const gaps = series.original.map((value, index) => Number.isFinite(value) ? -1 : index).filter(index => index >= 0);
+  assert.deepEqual(gaps, [0, 1, 2271, 2272, 2324, 2325, 2326, 2327, 2328]);
+
+  const before = series.targets.slice();
+  series.targets = core.applyOperation(series.targets, 0, series.targets.length - 1, {
+    mode: "fill_gaps", method: "linear", intervalMinutes: 2, maxGapMinutes: 0,
+  });
+  assert.ok(series.targets.every(Number.isFinite));
+  for (let index = 0; index < before.length; index++) {
+    if (Number.isFinite(before[index])) assert.equal(series.targets[index], before[index], `有效点 ${index} 不应改变`);
+  }
+
+  const output = core.createModifiedPlr(session);
+  assert.equal(output.edits.length, gaps.length);
+  assert.ok(output.edits.every(edit => edit.channel === 3 && edit.gapFilled));
+  assert.ok(output.edits.every(edit => edit.rawNew === Math.round(edit.targetTemp * session.scale)));
+  assert.equal(output.diff.unexpectedBytes, 0);
+  assert.equal(output.diff.headerChanged, false);
+  assert.equal(output.buffer.length, plr.data.length);
 });
 
 test("校验器拒绝头部或非目标字节变化", () => {
@@ -556,6 +615,11 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(indexHtml, /id="chartChannelLegend"/);
   assert.match(indexHtml, /id="operationScope"/);
   assert.match(indexHtml, /id="coordinatedDrawBtn"/);
+  assert.match(indexHtml, /id="gapDrawBtn"/);
+  assert.match(indexHtml, /id="yAxisMin"/);
+  assert.match(indexHtml, /id="yAxisMax"/);
+  assert.match(indexHtml, /id="yAxisStep"/);
+  assert.match(indexHtml, /value="fill_gaps"/);
   assert.match(indexHtml, /id="channelCount"/);
   assert.match(indexHtml, /id="addCoolingRequirementBtn"/);
   const appScript = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
@@ -565,6 +629,8 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(appScript, /applyCoordinatedStroke/);
   assert.match(appScript, /buildExportLegendLayout/);
   assert.match(appScript, /configureChartTooltip/);
+  assert.match(appScript, /applyYAxis/);
+  assert.match(appScript, /fillMissingValues/);
   assert.match(appScript, /sample_cooling/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
 });

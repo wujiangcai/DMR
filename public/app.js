@@ -6,7 +6,8 @@
     plrFile: null, excelFile: null, session: null,
     activeChannel: 1, selection: [0, 0], view: [0, 0], page: 0, pageSize: 50,
     displayChannels: [],
-    undo: [], redo: [], drawEnabled: true, coordinatedDrawEnabled: false, drag: null, panDrag: null, hoverIndex: null,
+    undo: [], redo: [], drawEnabled: true, gapDrawEnabled: true, coordinatedDrawEnabled: false, drag: null, panDrag: null, hoverIndex: null,
+    yAxis: { mode: "auto", min: null, max: null, step: null },
     chartMeta: null, latestOutput: null, requirementResult: null,
   };
 
@@ -31,6 +32,11 @@
     linear: `<label>起点温度（℃）<input data-op="startValue" type="number" value="90" step="0.1"></label><label>终点温度（℃）<input data-op="endValue" type="number" value="130" step="0.1"></label>`,
     clamp: `<label>最低温度（℃）<input data-op="minimum" type="number" value="95" step="0.1"></label><label>最高温度（℃）<input data-op="maximum" type="number" value="105" step="0.1"></label>`,
     smooth: `<label class="full">平滑窗口（采样点）<input data-op="window" type="number" value="7" min="1" step="2"></label>`,
+    fill_gaps: `
+      <label class="full">补全方式<select data-op="method"><option value="linear">前后有效点直线插值（推荐）</option><option value="nearest">保持最近有效温度</option><option value="constant">填入指定温度</option></select></label>
+      <label class="full" data-gap-constant>指定温度（℃）<input data-op="constantValue" type="number" value="100" step="0.1"></label>
+      <label class="full">最长补全空白（分钟）<input data-op="maxGapMinutes" type="number" value="0" min="0" step="1"><small>0 表示不限长度；超过限制的断连区保留空白。</small></label>
+      <div class="full operation-note">只填充选中范围内的无效/断连点，不改变已有有效温度。空白位于曲线首尾时会沿用最近的有效温度。</div>`,
     realistic_combustion: `
       <label class="full">真实波动预设<select data-op="curvePreset">${REALISTIC_PRESET_OPTIONS}<option value="custom">自定义参数</option></select></label>
       <div class="full operation-note" data-preset-hint></div>
@@ -114,6 +120,7 @@
       state.displayChannels = [state.activeChannel];
       state.selection = [0, state.session.rows.length - 1]; state.view = [...state.selection]; state.page = 0;
       state.undo = []; state.redo = []; state.latestOutput = null; state.requirementResult = null; state.hoverIndex = null; state.coordinatedDrawEnabled = false;
+      state.gapDrawEnabled = true; state.yAxis = { mode: "auto", min: null, max: null, step: null };
       initializeWorkspace();
       setMessage(`解析成功：${excel.rows.length} 个时间点、${state.session.usableChannels.length} 个温度通道，自动定位到物理记录 ${alignment.startRecordIndex}`, "success");
       $("workspace").classList.remove("hidden"); $("step1").classList.add("done"); $("step2").classList.add("active");
@@ -133,7 +140,7 @@
     $("manualStartRecord").value = session.alignment.startRecordIndex;
     $("imageNote").value = `${core.formatDate(session.excel.start)} 至 ${core.formatDate(session.excel.end)}`;
     $("timeWindowSelect").value = "all";
-    renderOperationFields(); renderRequirements(); renderAll(); updateHistoryButtons();
+    renderYAxisControls(); renderGapDrawState(); renderOperationFields(); renderRequirements(); renderAll(); updateHistoryButtons();
   }
 
   function renderAll(invalidateValidation = true) {
@@ -158,10 +165,41 @@
     $("rangeStartText").textContent = rows[a].time; $("rangeEndText").textContent = rows[b].time;
   }
 
+  function renderYAxisControls() {
+    const axis = state.yAxis;
+    $("yAxisMin").value = axis.mode === "manual" ? axis.min : "";
+    $("yAxisMax").value = axis.mode === "manual" ? axis.max : "";
+    $("yAxisStep").value = axis.mode === "manual" ? axis.step : "";
+    $("yAxisStatus").textContent = axis.mode === "manual"
+      ? `固定 ${axis.min} ～ ${axis.max} ℃，每格 ${axis.step} ℃`
+      : "自动跟随当前显示曲线";
+    $("yAxisStatus").classList.toggle("manual", axis.mode === "manual");
+  }
+
+  function applyYAxis() {
+    const min = Number($("yAxisMin").value), max = Number($("yAxisMax").value), step = Number($("yAxisStep").value);
+    if (![min, max, step].every(Number.isFinite)) return showToast("请完整填写纵轴最低、最高和每格温度", 3600);
+    if (max <= min) return showToast("纵轴最高温度必须大于最低温度", 3600);
+    if (step <= 0 || step > max - min) return showToast("每格温度必须大于 0 且不超过纵轴范围", 3600);
+    const divisions = (max - min) / step;
+    if (Math.abs(divisions - Math.round(divisions)) > 1e-8) return showToast("最高与最低温差必须是每格温度的整数倍", 4200);
+    if (divisions > 80) return showToast("纵轴网格不能超过 80 格，请增大每格温度", 4200);
+    state.yAxis = { mode: "manual", min, max, step };
+    renderYAxisControls(); drawChart();
+    showToast(`纵轴已固定为 ${min} ～ ${max} ℃，每格 ${step} ℃`);
+  }
+
+  function resetYAxis() {
+    state.yAxis = { mode: "auto", min: null, max: null, step: null };
+    renderYAxisControls(); drawChart(); showToast("纵轴已恢复自动范围");
+  }
+
   function totalChangedPoints() {
     if (!state.session) return 0;
     let count = 0;
-    for (const series of Object.values(state.session.channels)) for (let i = 0; i < series.targets.length; i++) if (series.original[i] != null && series.targets[i] != null && Math.abs(series.original[i] - series.targets[i]) > 1e-9) count++;
+    for (const series of Object.values(state.session.channels)) for (let i = 0; i < series.targets.length; i++) {
+      if (Number.isFinite(series.targets[i]) && (!Number.isFinite(series.original[i]) || Math.abs(series.original[i] - series.targets[i]) > 1e-9)) count++;
+    }
     return count;
   }
 
@@ -171,7 +209,7 @@
     for (let i = a; i <= b; i++) {
       if (Number.isFinite(series.targets[i])) values.push(series.targets[i]);
       if (Number.isFinite(series.original[i])) original.push(series.original[i]);
-      if (series.original[i] != null && series.targets[i] != null && Math.abs(series.original[i] - series.targets[i]) > 1e-9) changed++;
+      if (Number.isFinite(series.targets[i]) && (!Number.isFinite(series.original[i]) || Math.abs(series.original[i] - series.targets[i]) > 1e-9)) changed++;
     }
     const fmt = n => Number.isFinite(n) ? `${n.toFixed(1)}°` : "—";
     $("statMin").textContent = fmt(values.length ? Math.min(...values) : NaN);
@@ -245,6 +283,22 @@
     $("drawModeBtn").textContent = state.drawEnabled ? "✦ 绘制" : "↔ 平移";
     $("curveCanvas").style.cursor = state.drawEnabled ? "crosshair" : "grab";
     renderCoordinatedDrawState();
+  }
+
+  function renderGapDrawState() {
+    const button = $("gapDrawBtn");
+    if (!button) return;
+    button.classList.toggle("active", state.gapDrawEnabled);
+    button.textContent = state.gapDrawEnabled ? "断点补绘：开" : "断点补绘：关";
+    button.title = state.gapDrawEnabled
+      ? "拖动绘制可以穿过并补全热电偶断连空白"
+      : "当前不会修改热电偶断连空白";
+  }
+
+  function toggleGapDraw() {
+    state.gapDrawEnabled = !state.gapDrawEnabled;
+    renderGapDrawState();
+    showToast(state.gapDrawEnabled ? "已允许在图上直接补绘断连空白" : "已关闭断连空白补绘");
   }
 
   function renderCoordinatedDrawState() {
@@ -333,6 +387,11 @@
   function renderOperationFields() {
     $("operationFields").innerHTML = operationDefinitions[$("operationMode").value];
     if ($("operationMode").value === "realistic_combustion") bindRealisticPresetFields();
+    if ($("operationMode").value === "fill_gaps") {
+      const method = $("operationFields").querySelector('[data-op="method"]');
+      const sync = () => $("operationFields").querySelector("[data-gap-constant]").classList.toggle("hidden", method.value !== "constant");
+      method.addEventListener("change", sync); sync();
+    }
     renderOperationScopeHint();
   }
 
@@ -376,6 +435,9 @@
   function applyBatchOperation() {
     const snapshot = captureEditState(), [a, b] = state.selection, operation = readOperation(), channels = operationChannels();
     try {
+      const missingBefore = operation.mode === "fill_gaps"
+        ? channels.reduce((count, channel) => count + state.session.channels[channel].targets.slice(a, b + 1).filter(value => !Number.isFinite(value)).length, 0)
+        : 0;
       if (channels.length > 1 && operation.mode === "realistic_combustion") {
         const input = Object.fromEntries(channels.map(channel => [channel, state.session.channels[channel].targets]));
         const output = core.applyCoordinatedOperation(input, a, b, operation);
@@ -391,7 +453,10 @@
       }
       const label = channels.length > 1 ? `多通道协同：${$("operationMode").selectedOptions[0].textContent.trim()}` : $("operationMode").selectedOptions[0].textContent.trim();
       pushUndo(snapshot, label); renderAll();
-      showToast(`已处理 ${channels.map(channelLabel).join("、")} 的 ${b - a + 1} 个时间点`);
+      if (operation.mode === "fill_gaps") {
+        const missingAfter = channels.reduce((count, channel) => count + state.session.channels[channel].targets.slice(a, b + 1).filter(value => !Number.isFinite(value)).length, 0);
+        showToast(`已为 ${channels.map(channelLabel).join("、")} 补全 ${missingBefore - missingAfter} 个断连点`);
+      } else showToast(`已处理 ${channels.map(channelLabel).join("、")} 的 ${b - a + 1} 个时间点`);
     } catch (error) { showToast(error.message, 4200); }
   }
 
@@ -525,14 +590,22 @@
     const start = viewStart + state.page * state.pageSize, end = Math.min(viewEnd, start + state.pageSize - 1);
     const rows = state.session.rows, series = state.session.channels[state.activeChannel], body = $("dataBody"); body.innerHTML = "";
     for (let i = start; i <= end; i++) {
-      const original = series.original[i], target = series.targets[i], delta = original == null || target == null ? null : target - original;
+      const original = series.original[i], target = series.targets[i], delta = !Number.isFinite(original) || !Number.isFinite(target) ? null : target - original;
+      const gapFilled = !Number.isFinite(original) && Number.isFinite(target);
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${i + 1}</td><td>${rows[i].time}</td><td>${rows[i].physicalRecordIndex}</td><td>${original == null ? "—" : original.toFixed(2)}</td><td></td><td class="${delta > 0 ? "delta-up" : delta < 0 ? "delta-down" : ""}">${delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(2)}`}</td>`;
-      const cell = tr.children[4], input = document.createElement("input"); input.type = "number"; input.step = "0.1"; input.value = target == null ? "" : Number(target.toFixed(4)); input.disabled = original == null;
+      tr.classList.toggle("gap-row", !Number.isFinite(original));
+      tr.innerHTML = `<td>${i + 1}</td><td>${rows[i].time}</td><td>${rows[i].physicalRecordIndex}</td><td>${original == null ? '<span class="gap-label">断连</span>' : original.toFixed(2)}</td><td></td><td class="${gapFilled ? "gap-filled" : delta > 0 ? "delta-up" : delta < 0 ? "delta-down" : ""}">${gapFilled ? "已补全" : delta == null ? "—" : `${delta > 0 ? "+" : ""}${delta.toFixed(2)}`}</td>`;
+      const cell = tr.children[4], input = document.createElement("input"); input.type = "number"; input.step = "0.1"; input.value = target == null ? "" : Number(target.toFixed(4));
+      if (!Number.isFinite(original)) { input.placeholder = "输入温度补全"; input.title = "原始热电偶断连，可直接填写目标温度"; }
       let before = null; input.addEventListener("focus", () => before = captureEditState());
       input.addEventListener("change", () => {
+        if (input.value.trim() === "") {
+          if (!Number.isFinite(original)) { series.targets[i] = null; pushUndo(before || captureEditState(), `清除补全 ${rows[i].time}`); renderAll(); }
+          else input.value = target;
+          return;
+        }
         const value = Number(input.value); if (!Number.isFinite(value)) { input.value = target == null ? "" : target; return; }
-        series.targets[i] = value; pushUndo(before || captureEditState(), `逐点修改 ${rows[i].time}`); renderAll();
+        series.targets[i] = value; pushUndo(before || captureEditState(), `${Number.isFinite(original) ? "逐点修改" : "逐点补全"} ${rows[i].time}`); renderAll();
       });
       cell.appendChild(input); body.appendChild(tr);
     }
@@ -634,14 +707,24 @@
       for (let i = start; i <= end; i++) if (Number.isFinite(series.targets[i])) values.push(series.targets[i]);
     }
     for (let i = start; i <= end; i++) if (Number.isFinite(activeSeries.original[i])) values.push(activeSeries.original[i]);
-    if (!values.length) return;
-    let min = Math.min(...values), max = Math.max(...values); const pad = Math.max(2, (max - min) * .09); min -= pad; max += pad; if (min === max) { min -= 1; max += 1; }
+    if (!values.length && state.yAxis.mode !== "manual") return;
+    let min, max, yTicks;
+    if (state.yAxis.mode === "manual") {
+      min = state.yAxis.min; max = state.yAxis.max;
+      const divisions = Math.round((max - min) / state.yAxis.step);
+      yTicks = Array.from({ length: divisions + 1 }, (_, index) => min + state.yAxis.step * index).reverse();
+    } else {
+      min = Math.min(...values); max = Math.max(...values); const pad = Math.max(2, (max - min) * .09); min -= pad; max += pad; if (min === max) { min -= 1; max += 1; }
+      yTicks = Array.from({ length: 7 }, (_, index) => max - (max - min) * index / 6);
+    }
     const plotW = width - left - right, plotH = height - top - bottom, xOf = i => left + (i - start) / Math.max(1, end - start) * plotW, yOf = v => top + (max - v) / (max - min) * plotH;
     ctx.strokeStyle = "#e4eaec"; ctx.lineWidth = 1; ctx.fillStyle = "#60727b"; ctx.font = `${exportMode ? 16 : 10}px 'Segoe UI', sans-serif`;
-    for (let g = 0; g <= 6; g++) { const y = top + plotH * g / 6; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke(); const label = (max - (max - min) * g / 6).toFixed(1); ctx.textAlign = "right"; ctx.fillText(label, left - 9, y + 4); }
+    const tickDecimals = state.yAxis.mode === "manual" && Math.abs(state.yAxis.step - Math.round(state.yAxis.step)) > 1e-9 ? Math.min(4, Math.max(1, String(state.yAxis.step).split(".")[1]?.length || 1)) : 1;
+    for (const tick of yTicks) { const y = yOf(tick); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke(); const label = state.yAxis.mode === "manual" ? tick.toFixed(tickDecimals).replace(/\.0+$/, "") : tick.toFixed(1); ctx.textAlign = "right"; ctx.fillText(label, left - 9, y + 4); }
     for (let g = 0; g <= 8; g++) { const x = left + plotW * g / 8, index = Math.min(end, Math.round(start + (end - start) * g / 8)); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + plotH); ctx.stroke(); ctx.textAlign = g === 0 ? "left" : g === 8 ? "right" : "center"; const label = state.session.rows[index].time.slice(5, 16); ctx.fillText(label, x, top + plotH + (exportMode ? 31 : 21)); }
     const [selA, selB] = state.selection;
     if (!exportMode && selB >= start && selA <= end) { const x1 = xOf(Math.max(start, selA)), x2 = xOf(Math.min(end, selB)); ctx.fillStyle = "rgba(13,119,109,.055)"; ctx.fillRect(x1, top, Math.max(2, x2 - x1), plotH); ctx.strokeStyle = "rgba(13,119,109,.35)"; ctx.strokeRect(x1, top, Math.max(2, x2 - x1), plotH); }
+    ctx.save(); ctx.beginPath(); ctx.rect(left, top, plotW, plotH); ctx.clip();
     drawSeries(ctx, activeSeries.original, start, end, xOf, yOf, "#98a6ac", exportMode ? 2 : 1.35, plotW, { dash: exportMode ? [8, 6] : [5, 4], alpha: .9 });
     for (const channel of channels.filter(channel => channel !== state.activeChannel)) {
       drawSeries(ctx, state.session.channels[channel].targets, start, end, xOf, yOf, channelColor(channel), exportMode ? 2.6 : 1.55, plotW, { alpha: .88 });
@@ -659,12 +742,14 @@
       }
       ctx.restore();
     }
+    ctx.restore();
     ctx.strokeStyle = "#9caaaf"; ctx.lineWidth = 1; ctx.strokeRect(left, top, plotW, plotH);
     ctx.save(); ctx.translate(exportMode ? 28 : 17, top + plotH / 2); ctx.rotate(-Math.PI / 2); ctx.fillStyle = "#526870"; ctx.font = `${exportMode ? 17 : 10}px 'Microsoft YaHei', sans-serif`; ctx.textAlign = "center"; ctx.fillText("温度（℃）", 0, 0); ctx.restore();
     if (!exportMode) {
       state.chartMeta = { left, right: width - right, top, bottom: top + plotH, min, max, start, end, width, height };
       const rows = state.session.rows;
-      $("zoomStatus").textContent = `${rows[start].time.slice(5, 16)} ～ ${rows[end].time.slice(5, 16)} · ${end - start + 1} 点`;
+      const axisText = state.yAxis.mode === "manual" ? ` · Y轴 ${min}～${max}℃ / ${state.yAxis.step}℃` : "";
+      $("zoomStatus").textContent = `${rows[start].time.slice(5, 16)} ～ ${rows[end].time.slice(5, 16)} · ${end - start + 1} 点${axisText}`;
     }
   }
 
@@ -697,13 +782,22 @@
       $("curveCanvas").style.cursor = "grabbing"; event.preventDefault(); return;
     }
     if (event.button !== 0) return;
-    const series = state.session.channels[state.activeChannel]; if (series.original[p.index] == null) return;
+    const series = state.session.channels[state.activeChannel];
+    if (!Number.isFinite(series.targets[p.index]) && !state.gapDrawEnabled) {
+      showToast("这里是热电偶断连空白，请先开启“断点补绘”", 3000); return;
+    }
     const before = captureEditState(), channels = normalizedDisplayChannels();
     dismissChartTooltip();
     $("curveCanvas").setPointerCapture(event.pointerId);
     if (state.coordinatedDrawEnabled && channels.length > 1) {
-      const baseTargets = Object.fromEntries(channels.map(channel => [channel, before.targets[channel].slice()]));
-      const baseActive = baseTargets[state.activeChannel][p.index]; if (!Number.isFinite(baseActive)) return;
+      const baseTargets = Object.fromEntries(channels.map(channel => [channel, state.gapDrawEnabled
+        ? core.fillMissingValues(before.targets[channel], 0, before.targets[channel].length - 1, { method: "linear" })
+        : before.targets[channel].slice()]));
+      const baseActive = baseTargets[state.activeChannel][p.index];
+      if (!Number.isFinite(baseActive)) {
+        try { $("curveCanvas").releasePointerCapture(event.pointerId); } catch (_) {}
+        showToast("当前通道没有可用于协同补绘的有效温度，请先单通道绘制", 3600); return;
+      }
       const delta = p.value - baseActive;
       const currentTargets = Object.fromEntries(channels.map(channel => [channel, state.session.channels[channel].targets]));
       const output = core.applyCoordinatedStroke(baseTargets, currentTargets, p.index, delta, p.index, delta);
@@ -736,7 +830,7 @@
         state.drag.last = { ...p, delta }; drawChart(); event.preventDefault(); return;
       }
       const last = state.drag.last, from = Math.min(last.index, p.index), to = Math.max(last.index, p.index), span = p.index - last.index || 1;
-      for (let i = from; i <= to; i++) if (series.original[i] != null) series.targets[i] = last.value + (p.value - last.value) * (i - last.index) / span;
+      for (let i = from; i <= to; i++) if (Number.isFinite(series.targets[i]) || state.gapDrawEnabled) series.targets[i] = last.value + (p.value - last.value) * (i - last.index) / span;
       state.drag.last = p; drawChart(); event.preventDefault(); return;
     }
     state.hoverIndex = p.index; showChartTooltip(event, p); drawChart();
@@ -759,11 +853,12 @@
     const channels = normalizedDisplayChannels();
     const lines = channels.map(channel => {
       const series = state.session.channels[channel], original = series.original[p.index], target = series.targets[p.index];
-      const changed = Number.isFinite(original) && Number.isFinite(target) && Math.abs(original - target) > 1e-9;
+      const changed = Number.isFinite(target) && (!Number.isFinite(original) || Math.abs(original - target) > 1e-9);
+      const gapFilled = !Number.isFinite(original) && Number.isFinite(target);
       const value = target == null ? "—" : `${target.toFixed(2)} ℃`;
       const detail = channel === state.activeChannel
-        ? ` <em>编辑</em> · 原始 ${original == null ? "—" : original.toFixed(2) + " ℃"} → ${value}`
-        : ` · ${value}${changed ? " · 已修改" : ""}`;
+        ? ` <em>编辑</em> · 原始 ${original == null ? "断连" : original.toFixed(2) + " ℃"} → ${value}${gapFilled ? " · 已补全" : ""}`
+        : ` · ${value}${gapFilled ? " · 已补全" : changed ? " · 已修改" : ""}`;
       return `<span class="tooltip-channel" style="--channel-color:${channelColor(channel)}"><i></i><b>${channelLabel(channel)}</b>${detail}</span>`;
     }).join("");
     const editHint = state.coordinatedDrawEnabled && channels.length > 1
@@ -891,6 +986,7 @@
   $("rangeEnd").addEventListener("input", () => { normalizeSelection(); renderRange(); renderStats(); drawChart(); });
   $("selectAllBtn").addEventListener("click", () => { $("rangeStart").value = 0; $("rangeEnd").value = state.session.rows.length - 1; normalizeSelection(); renderAll(false); });
   $("zoomSelectionBtn").addEventListener("click", () => setViewRange(state.selection[0], state.selection[1], "custom"));
+  $("applyYAxisBtn").addEventListener("click", applyYAxis); $("autoYAxisBtn").addEventListener("click", resetYAxis);
   $("fitAllBtn").addEventListener("click", () => setViewRange(0, state.session.rows.length - 1, "all"));
   $("timeWindowSelect").addEventListener("change", e => applyTimeWindow(e.target.value));
   $("zoomInBtn").addEventListener("click", () => zoomView(0.72)); $("zoomOutBtn").addEventListener("click", () => zoomView(1.38));
@@ -900,6 +996,7 @@
   $("undoBtn").addEventListener("click", undo); $("redoBtn").addEventListener("click", redo);
   $("prevPage").addEventListener("click", () => { state.page--; renderTable(); }); $("nextPage").addEventListener("click", () => { state.page++; renderTable(); });
   $("coordinatedDrawBtn").addEventListener("click", toggleCoordinatedDraw);
+  $("gapDrawBtn").addEventListener("click", toggleGapDraw);
   $("drawModeBtn").addEventListener("click", () => setDrawEnabled(!state.drawEnabled));
   $("curveCanvas").addEventListener("pointerdown", beginDraw); $("curveCanvas").addEventListener("pointermove", continueDraw); $("curveCanvas").addEventListener("pointerup", endDraw); $("curveCanvas").addEventListener("pointercancel", endDraw); $("curveCanvas").addEventListener("pointerleave", hideTooltip);
   $("curveCanvas").addEventListener("wheel", handleChartWheel, { passive: false });

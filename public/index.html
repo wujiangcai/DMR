@@ -91,6 +91,17 @@
           <div class="range-actions"><button id="selectAllBtn" class="ghost small">全选</button><button id="zoomSelectionBtn" class="ghost small">图表聚焦范围</button></div>
         </section>
 
+        <section class="card panel axis-panel">
+          <span class="eyebrow">图表纵轴</span>
+          <div class="axis-fields">
+            <label>最低 ℃<input id="yAxisMin" type="number" step="0.1" placeholder="自动"></label>
+            <label>最高 ℃<input id="yAxisMax" type="number" step="0.1" placeholder="自动"></label>
+            <label>每格 ℃<input id="yAxisStep" type="number" min="0.01" step="0.1" placeholder="自动"></label>
+          </div>
+          <div class="axis-actions"><button id="applyYAxisBtn" class="secondary small">应用纵轴</button><button id="autoYAxisBtn" class="ghost small">恢复自动</button></div>
+          <div id="yAxisStatus" class="axis-status">自动跟随当前显示曲线</div>
+        </section>
+
         <section class="card panel operation-panel">
           <span class="eyebrow">批量生成</span>
           <label class="wide-label">处理方式
@@ -100,6 +111,7 @@
               <option value="linear">线性升温 / 降温</option>
               <option value="clamp">限制上下界</option>
               <option value="smooth">平滑曲线</option>
+              <option value="fill_gaps">补全断连空白</option>
               <option value="realistic_combustion">真实燃烧合规修复（推荐）</option>
               <option value="sine">叠加平滑波动</option>
               <option value="window_delta_clamp">限制单位时间温差</option>
@@ -140,6 +152,7 @@
               <button id="zoomOutBtn" class="ghost small" title="缩小">−</button>
               <button id="zoomInBtn" class="ghost small" title="放大">＋</button>
               <button id="fitAllBtn" class="ghost small">复位</button>
+              <button id="gapDrawBtn" class="gap-draw-toggle active" title="拖动绘制可以穿过并补全热电偶断连空白">断点补绘：开</button>
               <button id="coordinatedDrawBtn" class="coordinated-draw-toggle" title="在图上拖动时，让全部已展示通道使用相同温差联动" disabled>协同绘制：关</button>
               <button id="drawModeBtn" class="draw-toggle active">✦ 绘制</button>
             </div>
@@ -149,7 +162,7 @@
             <canvas id="curveCanvas"></canvas>
             <div id="chartTooltip" class="chart-tooltip hidden"></div>
           </div>
-          <div class="chart-hint"><span id="zoomStatus">显示全部</span><span id="drawScopeStatus" class="draw-scope-status">单通道绘制</span><span>滚轮：缩放 · Shift+滚轮：平移 · 双击：复位</span></div>
+          <div class="chart-hint"><span id="zoomStatus">显示全部</span><span id="drawScopeStatus" class="draw-scope-status">单通道绘制</span><span>断点补绘可穿过空白 · 滚轮：缩放 · Shift+滚轮：平移 · 双击：复位</span></div>
         </section>
 
         <section class="card table-card">

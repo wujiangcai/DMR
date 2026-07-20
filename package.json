@@ -7,9 +7,10 @@
   "scripts": {
     "package:win": "node scripts/build_portable.js",
     "launch": "node scripts/start_dmr.js",
+    "stop": "node scripts/stop_dmr.js",
     "start": "node src/server.js",
     "test": "node --test tests-js/*.test.js",
-    "check": "node --check scripts/build_portable.js && node --check scripts/start_dmr.js && node --check src/server.js && node --check src/plr/core.js && node --check public/app.js"
+    "check": "node --check scripts/build_portable.js && node --check scripts/start_dmr.js && node --check scripts/stop_dmr.js && node --check src/server.js && node --check src/plr/core.js && node --check public/app.js"
   },
   "dependencies": {
     "xlsx": "0.18.5"

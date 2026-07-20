@@ -108,6 +108,9 @@ function startServer() {
 
   child.unref();
   fs.writeFileSync(path.join(RUNTIME, "dmr-server.pid"), String(child.pid), "utf8");
+  fs.writeFileSync(path.join(RUNTIME, "dmr-server.json"), JSON.stringify({
+    pid: child.pid, host: HOST, port: PORT, server: SERVER, startedAt: timestamp,
+  }, null, 2), "utf8");
   return { child, stdoutPath, stderrPath };
 }
 

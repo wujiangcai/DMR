@@ -39,10 +39,12 @@ function build() {
   copy(path.join("src", "server.js"));
   copy(path.join("src", "plr", "core.js"));
   copy(path.join("scripts", "start_dmr.js"));
+  copy(path.join("scripts", "stop_dmr.js"));
   copy(path.join("fixtures", "DAT0131.PLR"));
   copy(path.join("fixtures", "curve.xls"));
   copy("README.md");
   copy("启动DMR曲线编辑器.cmd");
+  copy("停止DMR曲线编辑器.cmd");
   fs.copyFileSync(process.execPath, path.join(releaseDir, "runtime", "node.exe"));
 
   const instructions = [
@@ -54,6 +56,7 @@ function build() {
     "2. 双击“启动DMR曲线编辑器.cmd”。",
     "3. 等待浏览器自动打开 http://127.0.0.1:17378。",
     "4. 如果 Windows 显示安全提示，请选择“仍要运行”。",
+    "5. 使用完成后双击“停止DMR曲线编辑器.cmd”即可一键停止后台服务。",
     "",
     "本便携包已包含 Node.js 运行时，不需要安装 Node.js、Python 或 npm 依赖。",
     "启动日志位于解压目录下的 .runtime 文件夹。",
