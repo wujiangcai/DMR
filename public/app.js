@@ -457,7 +457,10 @@
         const missingAfter = channels.reduce((count, channel) => count + state.session.channels[channel].targets.slice(a, b + 1).filter(value => !Number.isFinite(value)).length, 0);
         showToast(`已为 ${channels.map(channelLabel).join("、")} 补全 ${missingBefore - missingAfter} 个断连点`);
       } else showToast(`已处理 ${channels.map(channelLabel).join("、")} 的 ${b - a + 1} 个时间点`);
-    } catch (error) { showToast(error.message, 4200); }
+    } catch (error) {
+      restoreEditState(snapshot); renderAll(); // 出错时回滚，避免留下改了一半且无法撤销的数据
+      showToast(error.message, 4200);
+    }
   }
 
   function restoreSelection() {
@@ -554,7 +557,15 @@
       if (notify) showToast("请先添加至少一条客户验收要求", 3800);
       return state.requirementResult;
     }
-    state.requirementResult = core.validateCustomerRequirements(state.session, requirements);
+    try {
+      state.requirementResult = core.validateCustomerRequirements(state.session, requirements);
+    } catch (error) {
+      state.requirementResult = null; renderRequirements();
+      const badge = $("validationBadge"); badge.className = "badge error"; badge.textContent = "客户要求无法校验";
+      $("validationSummary").textContent = error.message;
+      showToast(`客户要求校验失败：${error.message}`, 4500);
+      return { passed: false, hasRequirements: true, rules: [], violations: [] };
+    }
     renderRequirements();
     const badge = $("validationBadge");
     if (state.requirementResult.passed) {
@@ -759,8 +770,10 @@
     for (let i = start; i <= end; i += step) {
       const value = values[i]; if (!Number.isFinite(value)) { drawing = false; continue; }
       const x = xOf(i), y = yOf(value); if (!drawing) { ctx.moveTo(x, y); drawing = true; } else ctx.lineTo(x, y);
+      // 抽稀跳过的点里若有断连空白，也要断开线段，避免连线跨过空白
+      if (step > 1) for (let j = i + 1; j < i + step && j <= end; j++) if (!Number.isFinite(values[j])) { drawing = false; break; }
     }
-    if (Number.isFinite(values[end])) ctx.lineTo(xOf(end), yOf(values[end])); ctx.stroke(); ctx.restore();
+    if (drawing && Number.isFinite(values[end])) ctx.lineTo(xOf(end), yOf(values[end])); ctx.stroke(); ctx.restore();
   }
 
   function canvasPoint(event) {
@@ -1010,7 +1023,12 @@
   $("remapBtn").addEventListener("click", remapSession); $("exportPlrBtn").addEventListener("click", () => validateOutput(true)); $("exportCsvBtn").addEventListener("click", exportCsv); $("exportPngBtn").addEventListener("click", exportPng); $("exportProjectBtn").addEventListener("click", exportProject);
   $("projectFile").addEventListener("change", e => { if (e.target.files[0]) importProject(e.target.files[0]); e.target.value = ""; });
   $("verificationFile").addEventListener("change", e => { if (e.target.files[0]) verifyWithDmrExcel(e.target.files[0]); e.target.value = ""; });
-  window.addEventListener("resize", resizeAndDraw);
-  document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); } if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); } });
+  let resizePending = false;
+  window.addEventListener("resize", () => {
+    if (resizePending) return;
+    resizePending = true;
+    requestAnimationFrame(() => { resizePending = false; resizeAndDraw(); });
+  });
+  document.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); } if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); } });
   renderOperationFields();
 })();

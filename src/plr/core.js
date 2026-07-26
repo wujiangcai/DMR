@@ -171,15 +171,25 @@
     return layout.dataOffset + recordIndex * layout.recordSize + fieldIndex * 2;
   }
 
+  // 自动对齐要对同一份数据做数百万次 16 位读取，DataView 按底层字节数组缓存复用
+  const dataViewCache = new WeakMap();
+  function viewOf(plr) {
+    let view = dataViewCache.get(plr.data);
+    if (!view) {
+      view = new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength);
+      dataViewCache.set(plr.data, view);
+    }
+    return view;
+  }
+
   function readRaw(plr, recordIndex, fieldIndex) {
-    return new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).getUint16(rawOffset(plr, recordIndex, fieldIndex), true);
+    return viewOf(plr).getUint16(rawOffset(plr, recordIndex, fieldIndex), true);
   }
 
   function writeRaw(plr, recordIndex, fieldIndex, value) {
     const n = Number(value);
     assert(Number.isFinite(n) && n >= UINT16_MIN && n <= UINT16_MAX, `raw 字超出 uint16 范围：${value}`);
-    const offset = rawOffset(plr, recordIndex, fieldIndex);
-    new DataView(plr.data.buffer, plr.data.byteOffset, plr.data.byteLength).setUint16(offset, Math.round(n), true);
+    viewOf(plr).setUint16(rawOffset(plr, recordIndex, fieldIndex), Math.round(n), true);
     return Math.round(n);
   }
 
@@ -188,6 +198,7 @@
   }
 
   function addSampleIndices(length, count) {
+    count = Math.max(2, count); // count 为 1 时步长除零会产生 NaN 索引
     if (length <= count) return Array.from({ length }, (_, i) => i);
     const result = new Set([0, length - 1]);
     for (let i = 0; i < count; i++) result.add(Math.round(i * (length - 1) / (count - 1)));
@@ -198,7 +209,7 @@
     const scale = Number(options.rawPerCelsius || plr.layout.rawPerCelsius || 48);
     const channels = (options.channels || excel.channels).filter(channel =>
       excel.channels.includes(channel) && plr.validChannels.includes(channel) && channel * 2 + 2 <= plr.layout.recordSize);
-    const sampleRows = addSampleIndices(excel.rows.length, options.sampleCount || 180);
+    const sampleRows = options.sampleIndices || addSampleIndices(excel.rows.length, options.sampleCount || 180);
     let total = 0, error = 0, squared = 0, exact = 0;
     for (const rowIndex of sampleRows) {
       const physical = (startRecordIndex + rowIndex) % plr.layout.totalRecords;
@@ -227,8 +238,9 @@
   function alignExcelToPlr(excel, plr, options = {}) {
     assert(excel && excel.rows && excel.rows.length, "Excel 数据为空");
     const total = plr.layout.totalRecords;
+    const sharedOptions = { ...options, sampleIndices: addSampleIndices(excel.rows.length, options.sampleCount || 180) };
     const candidates = [];
-    for (let start = 0; start < total; start++) candidates.push(scoreAlignment(excel, plr, start, options));
+    for (let start = 0; start < total; start++) candidates.push(scoreAlignment(excel, plr, start, sharedOptions));
     candidates.sort((a, b) => a.meanAbsError - b.meanAbsError || b.exactRate - a.exactRate);
     const best = candidates[0];
     const second = candidates[1] || best;
@@ -239,6 +251,8 @@
   }
 
   function buildSession(plr, excel, alignment, options = {}) {
+    assert(excel.rows.length <= plr.layout.totalRecords,
+      `Excel 行数（${excel.rows.length}）超过 PLR 环形记录数（${plr.layout.totalRecords}），多行会写入同一条物理记录；请确认两个文件来自同一次记录`);
     const scale = Number(options.rawPerCelsius || plr.layout.rawPerCelsius || 48);
     const rows = excel.rows.map((row, index) => ({
       ...row,

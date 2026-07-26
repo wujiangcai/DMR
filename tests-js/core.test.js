@@ -633,4 +633,6 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.match(appScript, /fillMissingValues/);
   assert.match(appScript, /sample_cooling/);
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/%zz`)).status, 404, "畸形百分号编码应返回 404 而不是让服务崩溃");
+  assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).status, 200, "畸形请求后服务必须仍然存活");
 });
