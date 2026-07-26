@@ -19,7 +19,12 @@ const MIME = {
 };
 
 function safePublicPath(urlPath) {
-  const clean = decodeURIComponent(urlPath.split("?")[0]);
+  let clean;
+  try {
+    clean = decodeURIComponent(urlPath.split("?")[0]);
+  } catch (_error) {
+    return null; // 畸形百分号编码按 404 处理，不能让异常打死整个服务
+  }
   const relative = clean === "/" ? "index.html" : clean.replace(/^\/+/, "");
   const target = path.resolve(PUBLIC, relative);
   return target === PUBLIC || target.startsWith(PUBLIC + path.sep) ? target : null;
