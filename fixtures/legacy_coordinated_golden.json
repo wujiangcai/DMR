@@ -1,0 +1,10 @@
+{
+  "note": "v1 协同真实燃烧输出的 SHA-256 金标；无新参数时算法输出必须与此逐位一致",
+  "cases": {
+    "coordinated_heating": "7d940bc602fcb53d37494d185111be1c5610deab9493327cf78fc940f53a0912",
+    "coordinated_cooling": "9e48eb765a0b00e2b518f57e080dc46e330162619461ee96c40129f8109eba87",
+    "holding_joint_mask": "da05b2b3753f5b3f76b0eabe3c565cab7519eadec0d3e918daa5ce422904fb86",
+    "holding_missing_prefix": "4dba7002de99942da9812a8935a6a976da685cdf8e0a2d22fcbbc6df07769bea",
+    "single_cooling": "6eb709faaed11e619e28907748220e1cb00f8ad201b5a26d05b69ca06e3bec5a"
+  }
+}
