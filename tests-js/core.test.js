@@ -2,6 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const XLSX = require("xlsx");
@@ -635,4 +636,215 @@ test("本地服务提供健康检查、核心脚本和示例", async t => {
   assert.equal((await fetch(`http://127.0.0.1:${port}/../package.json`)).status, 404);
   assert.equal((await fetch(`http://127.0.0.1:${port}/%zz`)).status, 404, "畸形百分号编码应返回 404 而不是让服务崩溃");
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).status, 200, "畸形请求后服务必须仍然存活");
+});
+
+// ===== 多通道协同真实燃烧 v2（通道波动联动度） =====
+
+// 确定性伪噪声：不依赖 Math.random，保证测试可复现
+function pseudoNoise(index, key) {
+  const value = Math.sin(index * 12.9898 + key * 78.233) * 43758.5453;
+  return value - Math.floor(value) - 0.5;
+}
+
+function detrendedResiduals(values, start, end, windowPoints = 37) {
+  const radius = Math.floor(windowPoints / 2), segment = values.slice(start, end + 1);
+  return segment.map((value, index) => {
+    if (!Number.isFinite(value)) return null;
+    let sum = 0, count = 0;
+    for (let j = Math.max(0, index - radius); j <= Math.min(segment.length - 1, index + radius); j++) {
+      if (Number.isFinite(segment[j])) { sum += segment[j]; count++; }
+    }
+    return count ? value - sum / count : null;
+  });
+}
+
+function residualStd(values, start, end) {
+  const residual = detrendedResiduals(values, start, end).filter(Number.isFinite);
+  const mean = residual.reduce((a, b) => a + b, 0) / residual.length;
+  return Math.sqrt(residual.reduce((a, b) => a + (b - mean) ** 2, 0) / residual.length);
+}
+
+function residualCorrelation(left, right, start, end) {
+  const a = detrendedResiduals(left, start, end), b = detrendedResiduals(right, start, end);
+  const pairsA = [], pairsB = [];
+  for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i]) && Number.isFinite(b[i])) { pairsA.push(a[i]); pairsB.push(b[i]); }
+  return correlation(pairsA, pairsB);
+}
+
+test("协同真实燃烧不带联动度参数时与 v1 金标逐位一致", () => {
+  const golden = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "fixtures", "legacy_coordinated_golden.json"), "utf8")).cases;
+  const sha = value => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const heatingSource = {
+    1: Array.from({ length: 240 }, (_, i) => 100 + i * 0.045 + 1.1 * Math.sin(i / 11) + 0.35 * Math.sin(i / 3)),
+    2: Array.from({ length: 240 }, (_, i) => 107 + i * 0.052 + 1.4 * Math.sin((i + 2) / 12) + 0.3 * Math.sin(i / 4)),
+    3: Array.from({ length: 240 }, (_, i) => 94 + i * 0.04 + 0.9 * Math.sin((i - 3) / 10) + 0.4 * Math.sin(i / 5)),
+  };
+  assert.equal(sha(core.applyCoordinatedOperation(heatingSource, 20, 220, {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 5, amplitude: 1.5, preserveRatio: 0.4,
+    sharedRatio: 0.88, trendSyncRatio: 0.82, channelVariation: 0.08,
+    correlationMinutes: 18, eventsPerHour: 0.8, transitionMinutes: 8,
+    onlyViolations: false, seed: "coordinated-heating",
+  })), golden.coordinated_heating);
+  const coolingSource = {
+    1: Array.from({ length: 220 }, (_, i) => 360 - i * 0.2 + Math.sin(i / 9) * 2),
+    3: Array.from({ length: 220 }, (_, i) => 372 - i * 0.21 + Math.sin(i / 9 + 0.25) * 1.8),
+    5: Array.from({ length: 220 }, (_, i) => 348 - i * 0.19 + Math.sin(i / 9 - 0.2) * 2.2),
+  };
+  assert.equal(sha(core.applyCoordinatedOperation(coolingSource, 10, 205, {
+    mode: "realistic_combustion", phase: "cooling", intervalMinutes: 2,
+    windowMinutes: 60, maxFallPerHour: 5, amplitude: 3.8, preserveRatio: 0.76,
+    sharedRatio: 0.76, trendSyncRatio: 0.88, channelVariation: 0.15,
+    correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35,
+    cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 12,
+    onlyViolations: false, seed: "coordinated-cooling",
+  })), golden.coordinated_cooling);
+  const maskSource = { 1: Array(180).fill(800), 2: Array(180).fill(812), 3: Array(180).fill(794) };
+  for (let i = 75; i <= 100; i++) maskSource[1][i] += 9 * Math.sin((i - 75) / 4);
+  assert.equal(sha(core.applyCoordinatedOperation(maskSource, 0, 179, {
+    mode: "realistic_combustion", phase: "holding", intervalMinutes: 2,
+    windowMinutes: 60, maxFluctuation: 5, amplitude: 1.3, preserveRatio: 0.4,
+    sharedRatio: 0.9, trendSyncRatio: 0.85, channelVariation: 0.06,
+    transitionMinutes: 6, onlyViolations: true, seed: "joint-mask",
+  })), golden.holding_joint_mask);
+  const prefixSource = {
+    1: Array.from({ length: 100 }, (_, i) => 100 + i * 0.04),
+    2: Array.from({ length: 100 }, (_, i) => i < 8 ? null : 112 + i * 0.04),
+  };
+  assert.equal(sha(core.applyCoordinatedOperation(prefixSource, 0, 99, {
+    mode: "realistic_combustion", phase: "holding", intervalMinutes: 2,
+    windowMinutes: 60, maxFluctuation: 5, amplitude: 1.2, sharedRatio: 0.9,
+    trendSyncRatio: 0.85, onlyViolations: false, transitionMinutes: 6, seed: "missing-prefix",
+  })), golden.holding_missing_prefix);
+  const singleSource = Array.from({ length: 240 }, (_, i) => 320 - i * 0.22 + Math.sin(i / 8) * 2.4);
+  assert.equal(sha(core.applyOperation(singleSource, 12, 220, {
+    mode: "realistic_combustion", phase: "cooling", intervalMinutes: 2,
+    windowMinutes: 60, maxFallPerHour: 5, amplitude: 3.8, preserveRatio: 0.76,
+    correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35,
+    cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 12, seed: "cooling-limit",
+  })), golden.single_cooling);
+});
+
+test("v2 触发判定：UI 字符串触发新路径，空值与非法值走旧路径", () => {
+  const source = {
+    1: Array.from({ length: 200 }, (_, i) => 100 + i * 0.05 + pseudoNoise(i, 1)),
+    2: Array.from({ length: 200 }, (_, i) => 108 + i * 0.05 + pseudoNoise(i, 2)),
+  };
+  const base = {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 20, amplitude: 2, preserveRatio: 0.5,
+    sharedRatio: 0.8, trendSyncRatio: 0.8, channelVariation: 0.1,
+    correlationMinutes: 14, transitionMinutes: 6, onlyViolations: false, seed: "trigger-check",
+  };
+  const legacy = core.applyCoordinatedOperation(source, 10, 190, base);
+  assert.notDeepEqual(core.applyCoordinatedOperation(source, 10, 190, { ...base, channelCorrelation: "0.9" }), legacy, "字符串联动度必须触发 v2");
+  for (const invalid of ["", " ", "abc", null, undefined]) {
+    assert.deepEqual(core.applyCoordinatedOperation(source, 10, 190, { ...base, channelCorrelation: invalid }), legacy, `channelCorrelation=${JSON.stringify(invalid)} 应走旧路径`);
+  }
+  assert.deepEqual(
+    core.applyCoordinatedOperation(source, 10, 190, { ...base, channelCorrelation: 1.5 }),
+    core.applyCoordinatedOperation(source, 10, 190, { ...base, channelCorrelation: 1 }),
+    "超界联动度应 clamp 到 [0,1] 后仍走 v2");
+});
+
+test("v2 通道波动联动度直接对应通道间残差相关性且不再克隆", () => {
+  const count = 700, start = 30, end = 660;
+  const channels = [1, 2, 3, 4, 5, 6];
+  const source = Object.fromEntries(channels.map(channel => [channel,
+    Array.from({ length: count }, (_, i) => 100 + channel * 8 + i * 0.05 + pseudoNoise(i, channel) * 0.8),
+  ]));
+  const base = {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 30, amplitude: 2.2, preserveRatio: 0,
+    channelCorrelation: 0.9, trendSyncRatio: 0.8, channelVariation: 0,
+    matchChannelAmplitude: false, correlationMinutes: 14, trendMinutes: 75,
+    eventsPerHour: 1.1, cycleRatio: 0.1, pulseStrength: 1, transitionMinutes: 10,
+    onlyViolations: false, seed: "calibration",
+  };
+  const high = core.applyCoordinatedOperation(source, start, end, base);
+  const highCorrs = [], stds = [];
+  for (let a = 0; a < channels.length; a++) {
+    stds.push(residualStd(high[channels[a]], start + 20, end - 20));
+    for (let b = a + 1; b < channels.length; b++) highCorrs.push(residualCorrelation(high[channels[a]], high[channels[b]], start + 20, end - 20));
+  }
+  const highMean = highCorrs.reduce((x, y) => x + y, 0) / highCorrs.length;
+  assert.ok(highMean > 0.8 && highMean < 0.97, `联动度0.9的实际相关性均值应落在(0.8,0.97)，实测 ${highMean.toFixed(3)}`);
+  assert.ok(Math.max(...highCorrs) < 0.995, `任意通道对都不应克隆，最大相关 ${Math.max(...highCorrs).toFixed(4)}`);
+  for (const sigma of stds) assert.ok(sigma > 1.3 && sigma < 3.2, `amplitude=2.2 时残差σ应接近目标，实测 ${sigma.toFixed(2)}`);
+
+  const low = core.applyCoordinatedOperation(source, start, end, { ...base, channelCorrelation: 0.3 });
+  const lowCorrs = [];
+  for (let a = 0; a < channels.length; a++) for (let b = a + 1; b < channels.length; b++) {
+    lowCorrs.push(residualCorrelation(low[channels[a]], low[channels[b]], start + 20, end - 20));
+  }
+  const lowMean = lowCorrs.reduce((x, y) => x + y, 0) / lowCorrs.length;
+  assert.ok(lowMean < highMean - 0.3, `低联动度(0.3)相关性应显著低于高联动度(0.9)：${lowMean.toFixed(3)} vs ${highMean.toFixed(3)}`);
+});
+
+test("v2 波动过大的通道压到目标强度，波动较小的通道保持原有水平", () => {
+  const count = 500, start = 20, end = 480;
+  const source = {
+    1: Array.from({ length: count }, (_, i) => 200 + i * 0.02 + pseudoNoise(i, 11) * 1.2),
+    2: Array.from({ length: count }, (_, i) => 212 + i * 0.02 + pseudoNoise(i, 22) * 10),
+  };
+  const base = {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 30, amplitude: 2, preserveRatio: 0,
+    channelCorrelation: 0.85, trendSyncRatio: 0.8, channelVariation: 0,
+    correlationMinutes: 14, transitionMinutes: 8, onlyViolations: false, seed: "amplitude-cap",
+  };
+  const quietBefore = residualStd(source[1], start + 15, end - 15);
+  const loudBefore = residualStd(source[2], start + 15, end - 15);
+  assert.ok(quietBefore < 0.6 && loudBefore > 2.4, `测试前提：通道1安静(${quietBefore.toFixed(2)})、通道2超标(${loudBefore.toFixed(2)})`);
+
+  const capped = core.applyCoordinatedOperation(source, start, end, { ...base, matchChannelAmplitude: true });
+  const quietAfter = residualStd(capped[1], start + 15, end - 15);
+  const loudAfter = residualStd(capped[2], start + 15, end - 15);
+  assert.ok(loudAfter < loudBefore * 0.85, `超标通道必须被减小：${loudBefore.toFixed(2)} → ${loudAfter.toFixed(2)}`);
+  assert.ok(loudAfter > 1.2 && loudAfter < 2.6, `超标通道应压到目标强度2℃附近，实测 ${loudAfter.toFixed(2)}`);
+  assert.ok(quietAfter < quietBefore * 1.7 + 0.15, `安静通道不应被放大：${quietBefore.toFixed(2)} → ${quietAfter.toFixed(2)}`);
+  assert.ok(quietAfter < loudAfter * 0.45, "安静通道修复后仍应明显小于超标通道");
+
+  const preserved = core.applyCoordinatedOperation(source, start, end, { ...base, preserveRatio: 0.6, matchChannelAmplitude: true });
+  assert.ok(residualStd(preserved[2], start + 15, end - 15) < loudBefore * 0.9, "保留原曲线特征时超标通道同样被减小（保形状、减幅度）");
+
+  const uniform = core.applyCoordinatedOperation(source, start, end, { ...base, matchChannelAmplitude: false });
+  const uniformRatio = residualStd(uniform[2], start + 15, end - 15) / residualStd(uniform[1], start + 15, end - 15);
+  assert.ok(uniformRatio > 0.75 && uniformRatio < 1.3, `关闭开关后各通道统一使用目标强度，实测比例 ${uniformRatio.toFixed(2)}`);
+});
+
+test("v2 保持限速、联合掩码与随机种子可复现", () => {
+  const heatingSource = {
+    1: Array.from({ length: 260 }, (_, i) => 100 + i * 0.06 + pseudoNoise(i, 31) * 0.9),
+    2: Array.from({ length: 260 }, (_, i) => 109 + i * 0.055 + pseudoNoise(i, 32) * 1.1),
+    3: Array.from({ length: 260 }, (_, i) => 96 + i * 0.058 + pseudoNoise(i, 33) * 0.8),
+  };
+  const heatingOp = {
+    mode: "realistic_combustion", phase: "heating", intervalMinutes: 2,
+    windowMinutes: 60, maxRisePerHour: 5, amplitude: 1.8, preserveRatio: 0.5,
+    channelCorrelation: 0.9, trendSyncRatio: 0.82, channelVariation: 0.1,
+    correlationMinutes: 14, transitionMinutes: 8, onlyViolations: false, seed: "v2-rate",
+  };
+  const heated = core.applyCoordinatedOperation(heatingSource, 15, 245, heatingOp);
+  for (const channel of [1, 2, 3]) {
+    assert.ok(maximumWindowRise(heated[channel], 15, 245, 30) <= 5 + 1e-9, `通道${channel}必须满足每小时升温限制`);
+    assert.deepEqual(heated[channel].slice(0, 15), heatingSource[channel].slice(0, 15));
+    assert.deepEqual(heated[channel].slice(246), heatingSource[channel].slice(246));
+  }
+  assert.deepEqual(core.applyCoordinatedOperation(heatingSource, 15, 245, heatingOp), heated, "同种子必须逐位可复现");
+  assert.notDeepEqual(core.applyCoordinatedOperation(heatingSource, 15, 245, { ...heatingOp, seed: "v2-rate-other" }), heated, "不同种子应产生不同曲线");
+
+  const maskSource = { 1: Array(180).fill(800), 2: Array(180).fill(812), 3: Array(180).fill(794) };
+  for (let i = 75; i <= 100; i++) maskSource[1][i] += 9 * Math.sin((i - 75) / 4);
+  const masked = core.applyCoordinatedOperation(maskSource, 0, 179, {
+    mode: "realistic_combustion", phase: "holding", intervalMinutes: 2,
+    windowMinutes: 60, maxFluctuation: 5, amplitude: 1.3, preserveRatio: 0.4,
+    channelCorrelation: 0.86, trendSyncRatio: 0.85, channelVariation: 0.06,
+    transitionMinutes: 6, onlyViolations: true, seed: "v2-mask",
+  });
+  for (const channel of [1, 2, 3]) {
+    assert.deepEqual(masked[channel].slice(0, 40), maskSource[channel].slice(0, 40), `通道${channel}掩码外前段必须不变`);
+    assert.deepEqual(masked[channel].slice(145), maskSource[channel].slice(145), `通道${channel}掩码外后段必须不变`);
+    assert.ok(maximumWindowFluctuation(masked[channel], 0, 179, 30) <= 5 + 1e-9, `通道${channel}必须满足保温窗口温差限制`);
+  }
 });

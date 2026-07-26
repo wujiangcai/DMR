@@ -28,28 +28,28 @@
   const REALISTIC_COMBUSTION_PRESETS = Object.freeze({
     sample_heating: Object.freeze({
       label: "真实样本·升温（推荐）",
-      description: "依据真实升温段约1.9～2.9℃残差、较强惯性和非固定燃料扰动设置；周期成分较弱。",
-      parameters: Object.freeze({ phase: "heating", amplitude: 2.2, preserveRatio: 0.62, sharedRatio: 0.78, trendSyncRatio: 0.82, channelVariation: 0.12, correlationMinutes: 14, trendMinutes: 75, eventsPerHour: 1.1, cycleRatio: 0.10, pulseStrength: 1.0, transitionMinutes: 12 }),
+      description: "按真实升温段实测设置：修复后波动上限约2.2℃（真实各通道1.6～2.5℃；波动超标的通道压到该值，较安静的通道保持原有水平），通道联动度0.90；保留较强惯性与非固定燃料扰动，周期成分较弱。",
+      parameters: Object.freeze({ phase: "heating", amplitude: 2.2, preserveRatio: 0.62, channelCorrelation: 0.90, trendSyncRatio: 0.82, channelVariation: 0.12, correlationMinutes: 14, trendMinutes: 75, eventsPerHour: 1.1, cycleRatio: 0.10, pulseStrength: 1.0, transitionMinutes: 12 }),
     }),
     sample_holding: Object.freeze({
       label: "真实样本·保温稳态",
-      description: "依据真实保温段约1.4～1.7℃残差和0.72～0.88通道联动设置；波动收敛但不形成规则正弦。",
-      parameters: Object.freeze({ phase: "holding", amplitude: 1.5, preserveRatio: 0.72, sharedRatio: 0.82, trendSyncRatio: 0.68, channelVariation: 0.08, correlationMinutes: 20, trendMinutes: 60, eventsPerHour: 0.55, cycleRatio: 0.06, pulseStrength: 0.7, transitionMinutes: 10 }),
+      description: "按真实保温段实测设置：波动上限约1.5℃（真实各通道1.1～1.8℃；超标压下、安静保持），通道联动度0.86；波动收敛但不形成规则正弦。",
+      parameters: Object.freeze({ phase: "holding", amplitude: 1.5, preserveRatio: 0.72, channelCorrelation: 0.86, trendSyncRatio: 0.68, channelVariation: 0.08, correlationMinutes: 20, trendMinutes: 60, eventsPerHour: 0.55, cycleRatio: 0.06, pulseStrength: 0.7, transitionMinutes: 10 }),
     }),
     sample_cooling: Object.freeze({
       label: "真实样本·降温余热",
-      description: "依据真实自然降温段约4.8℃残差、长相关惯性和0.74通道联动设置；保留散热滞后与偶发扰动。",
-      parameters: Object.freeze({ phase: "cooling", amplitude: 3.8, preserveRatio: 0.76, sharedRatio: 0.76, trendSyncRatio: 0.88, channelVariation: 0.15, correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35, cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 16 }),
+      description: "按真实自然降温段实测设置：波动上限约3.8℃（超标压下、安静保持），通道联动度约0.75，惯性时间更长；保留散热滞后与偶发扰动。",
+      parameters: Object.freeze({ phase: "cooling", amplitude: 3.8, preserveRatio: 0.76, channelCorrelation: 0.75, trendSyncRatio: 0.88, channelVariation: 0.15, correlationMinutes: 32, trendMinutes: 120, eventsPerHour: 0.35, cycleRatio: 0.05, pulseStrength: 0.75, transitionMinutes: 16 }),
     }),
     original_first: Object.freeze({
       label: "原曲线优先·轻修复",
-      description: "最大程度保留原有细节，只削弱违规或机械重复部分，适合原始曲线总体可信的情况。",
-      parameters: Object.freeze({ amplitude: 1.2, preserveRatio: 0.85, sharedRatio: 0.68, trendSyncRatio: 0.65, channelVariation: 0.12, correlationMinutes: 12, trendMinutes: 45, eventsPerHour: 0.8, cycleRatio: 0.04, pulseStrength: 0.8, transitionMinutes: 8 }),
+      description: "最大程度保留原有细节，补入的波动典型幅度仅约1.2℃、联动度0.85，只削弱违规或机械重复部分；适合原始曲线总体可信的情况。",
+      parameters: Object.freeze({ amplitude: 1.2, preserveRatio: 0.85, channelCorrelation: 0.85, trendSyncRatio: 0.65, channelVariation: 0.12, correlationMinutes: 12, trendMinutes: 45, eventsPerHour: 0.8, cycleRatio: 0.04, pulseStrength: 0.8, transitionMinutes: 8 }),
     }),
     irregular_strong: Object.freeze({
       label: "强扰动·弱周期",
-      description: "降低周期占比、增加非对称燃料脉冲和通道差异，适合原曲线过于平滑或规律的区段。",
-      parameters: Object.freeze({ amplitude: 2.8, preserveRatio: 0.48, sharedRatio: 0.70, trendSyncRatio: 0.74, channelVariation: 0.18, correlationMinutes: 9, trendMinutes: 55, eventsPerHour: 1.8, cycleRatio: 0.03, pulseStrength: 1.35, transitionMinutes: 12 }),
+      description: "典型波动增强至约2.8℃，联动度降至0.78并加大通道间随机差异；降低周期占比、增加非对称燃料脉冲，适合原曲线过于平滑或规律的区段。",
+      parameters: Object.freeze({ amplitude: 2.8, preserveRatio: 0.48, channelCorrelation: 0.78, trendSyncRatio: 0.74, channelVariation: 0.18, correlationMinutes: 9, trendMinutes: 55, eventsPerHour: 1.8, cycleRatio: 0.03, pulseStrength: 1.35, transitionMinutes: 12 }),
     }),
   });
 
@@ -554,6 +554,219 @@
     return enforceHoldingFluctuation(result, lo, hi, windowPoints, maxFluctuation);
   }
 
+  function normalizeSegment(values, lo, hi) {
+    let sum = 0, count = 0;
+    for (let i = lo; i <= hi; i++) if (Number.isFinite(values[i])) { sum += values[i]; count++; }
+    const result = Array(values.length).fill(0);
+    if (count < 2) return result;
+    const mean = sum / count;
+    let squared = 0;
+    for (let i = lo; i <= hi; i++) if (Number.isFinite(values[i])) squared += (values[i] - mean) ** 2;
+    const sigma = Math.sqrt(squared / count);
+    if (sigma < 1e-9) return result;
+    for (let i = lo; i <= hi; i++) if (Number.isFinite(values[i])) result[i] = (values[i] - mean) / sigma;
+    return result;
+  }
+
+  // UI 表单传来的是字符串；undefined/null/空白串/NaN 一律走旧路径，有限数 clamp 到 [0,1] 走 v2
+  function readChannelCorrelation(operation) {
+    const raw = operation ? operation.channelCorrelation : null;
+    if (raw == null) return null;
+    if (typeof raw === "string" && raw.trim() === "") return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return null;
+    return clamp(value, 0, 1);
+  }
+
+  /*
+   * 多通道协同真实燃烧 v2。
+   * 以真实 DAT0131 实测为目标：通道间去趋势残差相关性 升温0.90/保温0.86，
+   * 各通道波动强度差异最高约1.6倍，无通道间滞后。
+   * 关键改进：共享驱动与逐通道独立驱动均归一化到单位σ后按 √c/√(1-c) 混合，
+   * 使"通道波动联动度"参数直接等于目标相关性；amplitude 直接等于目标残差σ上限——
+   * 原始波动超过它的通道压到该目标值，原始波动较小的通道保持自身水平不被放大。
+   */
+  function coordinatedRealisticV2(entries, length, start, end, operation, channelCorrelation) {
+    const lo = Math.max(0, Math.min(length - 1, Math.min(start, end)));
+    const hi = Math.max(0, Math.min(length - 1, Math.max(start, end)));
+    const number = (key, fallback = 0) => Number.isFinite(Number(operation[key])) ? Number(operation[key]) : fallback;
+    const interval = Math.max(0.01, number("intervalMinutes", 2));
+    const phase = normalizeCombustionPhase(operation.phase);
+    const windowMinutes = Math.max(interval, number("windowMinutes", 60));
+    const windowPoints = Math.max(1, Math.round(windowMinutes / interval));
+    const maxRise = Math.max(0, number("maxRisePerHour", 5)) * windowMinutes / 60;
+    const maxFall = Math.max(0, number("maxFallPerHour", 5)) * windowMinutes / 60;
+    const maxFluctuation = Math.max(0, number("maxFluctuation", 5));
+    const defaultAmplitude = phase === "holding" ? 1.2 : phase === "cooling" ? 3.2 : 1.8;
+    const amplitude = Math.max(0, number("amplitude", defaultAmplitude));
+    const preserve = clamp(number("preserveRatio", 0.45), 0, 1);
+    const trendSyncRatio = clamp(number("trendSyncRatio", 0.8), 0, 1);
+    const channelVariation = clamp(number("channelVariation", 0.08), 0, 0.5);
+    const commonOffset = number("commonOffset", 0);
+    const correlationMinutes = Math.max(interval, number("correlationMinutes", 18));
+    const defaultTrendMinutes = phase === "holding" ? 45 : phase === "cooling" ? 120 : 90;
+    const trendMinutes = Math.max(interval, number("trendMinutes", defaultTrendMinutes));
+    const transitionMinutes = Math.max(0, number("transitionMinutes", 10));
+    const transitionPoints = Math.round(transitionMinutes / interval);
+    const onlyViolations = operation.onlyViolations === true || String(operation.onlyViolations).toLowerCase() === "true";
+    const matchChannelAmplitude = !(operation.matchChannelAmplitude === false
+      || String(operation.matchChannelAmplitude).toLowerCase() === "false");
+    const seed = operation.seed == null || operation.seed === "" ? "20260719" : operation.seed;
+    const trendWindow = Math.max(3, Math.round(trendMinutes / interval) | 1);
+
+    const baselines = {}, baselineAnchors = {};
+    for (const [channel, values] of entries) {
+      const baseline = movingAverageSegment(values, lo, hi, trendWindow);
+      baselines[channel] = baseline;
+      let anchorIndex = lo;
+      while (anchorIndex <= hi && (!Number.isFinite(values[anchorIndex]) || !Number.isFinite(baseline[anchorIndex]))) anchorIndex++;
+      baselineAnchors[channel] = anchorIndex <= hi ? { index: anchorIndex, value: values[anchorIndex] } : null;
+    }
+    const commonTrend = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      const deltas = [];
+      for (const [channel] of entries) {
+        const anchor = baselineAnchors[channel];
+        if (anchor && i >= anchor.index && Number.isFinite(baselines[channel][i])) deltas.push(baselines[channel][i] - anchor.value);
+      }
+      commonTrend[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : 0;
+    }
+
+    let mask = Array(length).fill(true);
+    if (onlyViolations) {
+      mask = Array(length).fill(false);
+      for (const [, values] of entries) {
+        const channelMask = detectViolationMask(values, lo, hi, phase, windowPoints, phaseLimit(phase, maxRise, maxFall, maxFluctuation));
+        for (let i = lo; i <= hi; i++) mask[i] = mask[i] || channelMask[i];
+      }
+      mask = expandMask(mask, lo, hi, transitionPoints);
+    }
+
+    // 各通道有效波动强度（℃）：amplitude 是修复上限——原始波动超过它的通道压到该目标值，
+    // 原始波动较小的通道保持自身水平、不会被放大；测量不足时统一使用目标强度
+    const ownSigmas = {};
+    for (const [channel, values] of entries) {
+      const baseline = baselines[channel];
+      let sum = 0, squared = 0, count = 0;
+      for (let i = lo; i <= hi; i++) {
+        if (!Number.isFinite(values[i]) || !Number.isFinite(baseline[i])) continue;
+        const residual = values[i] - baseline[i];
+        sum += residual; squared += residual * residual; count++;
+      }
+      ownSigmas[channel] = count >= 8 ? Math.sqrt(Math.max(0, squared / count - (sum / count) ** 2)) : null;
+    }
+    const channelAmplitudes = {}, ownShrinks = {};
+    for (const [channel] of entries) {
+      const ownSigma = ownSigmas[channel];
+      let effective = matchChannelAmplitude && Number.isFinite(ownSigma) ? Math.min(ownSigma, amplitude) : amplitude;
+      const jitterRandom = seededRandom(`${seed}|v2-variation|${channel}`);
+      effective = Math.max(0, effective * (1 + (jitterRandom() * 2 - 1) * channelVariation));
+      channelAmplitudes[channel] = effective;
+      // 超标通道保留下来的原残差按比例缩小：保形状、减幅度
+      ownShrinks[channel] = matchChannelAmplitude && Number.isFinite(ownSigma) && ownSigma > 1e-9 && ownSigma > effective
+        ? effective / ownSigma
+        : 1;
+    }
+
+    // 驱动归一化后 amplitude 即目标残差σ；生成时传 amplitude||1 避免 0 幅度产生全零驱动无法归一
+    const sharedDriver = normalizeSegment(
+      generateCombustionDriver(length, lo, hi, operation, number, seededRandom(`${seed}|v2-shared`), phase, amplitude || 1, interval, correlationMinutes),
+      lo, hi);
+    const rho = Math.exp(-interval / correlationMinutes);
+    const independentDrivers = {};
+    for (const [channel] of entries) {
+      const random = seededRandom(`${seed}|v2-individual|${channel}`);
+      const driver = Array(length).fill(0);
+      let value = gaussianRandom(random);
+      for (let i = lo; i <= hi; i++) {
+        value = rho * value + Math.sqrt(Math.max(0, 1 - rho * rho)) * gaussianRandom(random);
+        driver[i] = value;
+      }
+      independentDrivers[channel] = normalizeSegment(driver, lo, hi);
+    }
+
+    const sharedWeight = Math.sqrt(channelCorrelation);
+    const soloWeight = Math.sqrt(1 - channelCorrelation);
+    const mixNormalizer = Math.sqrt(preserve * preserve + (1 - preserve) * (1 - preserve));
+
+    const output = {};
+    for (const [channel, values] of entries) {
+      const result = values.slice();
+      const anchor = baselineAnchors[channel];
+      if (!anchor) { output[channel] = result; continue; }
+      const channelAmplitude = channelAmplitudes[channel];
+      for (let i = lo; i <= hi; i++) {
+        if (!mask[i] || !Number.isFinite(values[i]) || !Number.isFinite(baselines[channel][i])) continue;
+        const synthetic = (sharedWeight * sharedDriver[i] + soloWeight * independentDrivers[channel][i]) * channelAmplitude;
+        const own = clamp((values[i] - baselines[channel][i]) * ownShrinks[channel], -3 * channelAmplitude, 3 * channelAmplitude);
+        const residual = (preserve * own + (1 - preserve) * synthetic) / mixNormalizer;
+        const synchronizedTrend = anchor.value + commonTrend[i] - commonTrend[anchor.index];
+        const trend = (1 - trendSyncRatio) * baselines[channel][i] + trendSyncRatio * synchronizedTrend;
+        result[i] = trend + commonOffset + residual;
+      }
+
+      if (transitionPoints > 0) {
+        for (let i = lo; i <= Math.min(hi, lo + transitionPoints); i++) {
+          if (!mask[i] || !Number.isFinite(result[i]) || !Number.isFinite(values[i])) continue;
+          const weight = (i - lo) / Math.max(1, transitionPoints);
+          result[i] = values[i] * (1 - weight) + result[i] * weight;
+        }
+        for (let i = Math.max(lo, hi - transitionPoints); i <= hi; i++) {
+          if (!mask[i] || !Number.isFinite(result[i]) || !Number.isFinite(values[i])) continue;
+          const weight = (hi - i) / Math.max(1, transitionPoints);
+          result[i] = values[i] * (1 - weight) + result[i] * weight;
+        }
+      }
+      output[channel] = result;
+    }
+
+    if (phase === "holding") {
+      for (const [channel] of entries) output[channel] = enforceHoldingFluctuation(output[channel], lo, hi, windowPoints, maxFluctuation);
+      return output;
+    }
+
+    const outputAnchors = {};
+    for (const [channel] of entries) {
+      let index = lo;
+      while (index <= hi && !Number.isFinite(output[channel][index])) index++;
+      outputAnchors[channel] = index <= hi ? { index, value: output[channel][index] } : null;
+    }
+    const rawGroupDriver = Array(length).fill(0);
+    for (let i = lo; i <= hi; i++) {
+      const deltas = [];
+      for (const [channel] of entries) {
+        const anchor = outputAnchors[channel];
+        if (anchor && i >= anchor.index && Number.isFinite(output[channel][i])) deltas.push(output[channel][i] - anchor.value);
+      }
+      rawGroupDriver[i] = deltas.length ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length : (i > lo ? rawGroupDriver[i - 1] : 0);
+    }
+    const enforceRate = phase === "cooling" ? enforceCoolingRate : enforceHeatingRate;
+    const rateLimit = phase === "cooling" ? maxFall : maxRise;
+    const constrainedGroupDriver = enforceRate(
+      rawGroupDriver, lo, hi, windowPoints, rateLimit * 0.82,
+      seededRandom(`${seed}|v2-group-constraint`), onlyViolations ? mask : null,
+    );
+    for (const [channel] of entries) {
+      const anchor = outputAnchors[channel];
+      if (!anchor) continue;
+      // 组内偏差含通道自身趋势差异，限幅给出下限以免安静通道的趋势个性被削平
+      const groupClamp = 3 * Math.max(channelAmplitudes[channel], amplitude * 0.5);
+      for (let i = lo; i <= hi; i++) {
+        if ((onlyViolations && !mask[i]) || i < anchor.index || !Number.isFinite(output[channel][i])) continue;
+        const rawCommon = anchor.value + rawGroupDriver[i] - rawGroupDriver[anchor.index];
+        // 与旧路径不同：偏差全权重加回（旧路径的 0.06~0.25 压缩正是通道克隆感的主因）
+        const independent = clamp(output[channel][i] - rawCommon, -groupClamp, groupClamp);
+        output[channel][i] = anchor.value + constrainedGroupDriver[i] - constrainedGroupDriver[anchor.index] + independent;
+      }
+      // 逐通道独立限速种子；旧路径全通道共用同一随机流，也是克隆成因之一
+      output[channel] = enforceRate(
+        output[channel], lo, hi, windowPoints, rateLimit,
+        seededRandom(`${seed}|v2-final|${channel}`), onlyViolations ? mask : null,
+      );
+    }
+    return output;
+  }
+
   function applyCoordinatedOperation(seriesByChannel, start, end, operation = {}) {
     const entries = Object.entries(seriesByChannel || {}).filter(([, values]) => Array.isArray(values));
     assert(entries.length > 0, "多通道协同修复至少需要一个通道");
@@ -561,6 +774,10 @@
     assert(entries.every(([, values]) => values.length === length), "协同修复的各通道点数必须一致");
     if (operation.mode !== "realistic_combustion" || entries.length === 1) {
       return Object.fromEntries(entries.map(([channel, values]) => [channel, applyOperation(values, start, end, operation)]));
+    }
+    const channelCorrelation = readChannelCorrelation(operation);
+    if (channelCorrelation != null) {
+      return coordinatedRealisticV2(entries, length, start, end, operation, channelCorrelation);
     }
 
     const lo = Math.max(0, Math.min(length - 1, Math.min(start, end)));

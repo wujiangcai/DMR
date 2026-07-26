@@ -47,9 +47,9 @@
       <label data-phase-limit="holding" class="hidden">窗口最大温差（℃）<input data-op="maxFluctuation" type="number" value="5" min="0" step="0.1"></label>
       <label>自然波动强度（℃）<input data-op="amplitude" type="number" value="2.2" min="0" step="0.1"></label>
       <label>保留原曲线特征（0～1）<input data-op="preserveRatio" type="number" value="0.62" min="0" max="1" step="0.01"></label>
-      <label>共同波动比例（0～1）<input data-op="sharedRatio" type="number" value="0.78" min="0" max="1" step="0.01"></label>
+      <label>通道波动联动度（0～1）<input data-op="channelCorrelation" type="number" value="0.90" min="0" max="1" step="0.01"></label>
       <label>趋势同步比例（0～1）<input data-op="trendSyncRatio" type="number" value="0.82" min="0" max="1" step="0.01"></label>
-      <label>通道响应差异（0～0.5）<input data-op="channelVariation" type="number" value="0.12" min="0" max="0.5" step="0.01"></label>
+      <label>通道强度随机差异（0～0.5）<input data-op="channelVariation" type="number" value="0.12" min="0" max="0.5" step="0.01"></label>
       <label>共同温度调整（℃）<input data-op="commonOffset" type="number" value="0" step="0.1"></label>
       <label>波动相关时间（分钟）<input data-op="correlationMinutes" type="number" value="14" min="1"></label>
       <label>趋势提取时间（分钟）<input data-op="trendMinutes" type="number" value="75" min="1"></label>
@@ -58,9 +58,10 @@
       <label>脉冲扰动强度（0～3）<input data-op="pulseStrength" type="number" value="1" min="0" max="3" step="0.05"></label>
       <label>随机种子<input data-op="seed" value="20260719"></label>
       <label>边界过渡（分钟）<input data-op="transitionMinutes" type="number" value="12" min="0"></label>
+      <label class="full check-field"><input data-op="matchChannelAmplitude" type="checkbox" checked> 按各通道原始波动自动调节强度（波动过大的通道压到“自然波动强度”目标值，波动较小的通道保持原有水平不放大；数据不足时统一使用目标强度）</label>
       <label class="full check-field"><input data-op="onlyViolations" type="checkbox" checked> 只修复任一已选通道检测到的违规窗口及过渡区</label>
       <label class="full check-field"><input data-op="createRequirement" type="checkbox" checked> 为每个协同修改通道加入客户验收要求</label>
-      <div class="full operation-note">共同驱动由多时间尺度随机惯性、变周期弱成分、非对称脉冲和微扰组成；周期占比已显著降低，避免生成规则正弦曲线。</div>`,
+      <div class="full operation-note">自然波动强度是修复后波动幅度的上限（℃）：原始波动超过它的通道压到该值，较安静的通道保持自身水平。共同驱动由多时间尺度随机惯性、变周期弱成分、非对称脉冲和微扰组成；每个通道另有独立扰动，按通道波动联动度混合（1=完全同步，0=各自独立），不会生成完全相同的克隆曲线。</div>`,
     sine: `<label>波动幅度（℃）<input data-op="amplitude" type="number" value="3" step="0.1"></label><label>一个周期点数<input data-op="period" type="number" value="20" min="1"></label>`,
     window_delta_clamp: `<label>时间窗口（分钟）<input data-op="windowMinutes" type="number" value="10" min="1"></label><label>最大温差（℃）<input data-op="maxDelta" type="number" value="5" min="0" step="0.1"></label>`,
   };
@@ -342,7 +343,7 @@
       restoreButton.textContent = `恢复${channelLabel(state.activeChannel)}选中范围原始值`;
     } else {
       hint.textContent = realistic
-        ? `将协同修改 ${channels.map(channelLabel).join("、")}：共享燃烧趋势和波动，同时保留各通道温差与少量独立响应。`
+        ? `将协同修改 ${channels.map(channelLabel).join("、")}：各通道按联动度共享燃烧节奏，波动过大的通道自动减小、波动较小的保持原样，保留通道温差，不生成完全相同的克隆曲线。`
         : `将同一参数同步应用到 ${channels.length} 个已展示通道；恒温和线性模式会使用相同绝对目标温度。`;
       applyButton.textContent = realistic ? `协同修复 ${channels.length} 个已展示通道` : `同步应用到 ${channels.length} 个已展示通道`;
       restoreButton.textContent = `恢复 ${channels.length} 个已展示通道原始值`;
@@ -375,6 +376,8 @@
     });
     root.querySelectorAll("[data-op]").forEach(input => {
       if (input === presetSelect || input === phaseSelect) return;
+      // matchChannelAmplitude 是"有无原始数据可参考"的开关，不属于预设风格参数，勾选变化不应转为自定义
+      if (input.dataset.op === "matchChannelAmplitude") return;
       input.addEventListener("change", () => {
         presetSelect.value = "custom";
         const hint = root.querySelector("[data-preset-hint]");
